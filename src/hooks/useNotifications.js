@@ -8,16 +8,16 @@ export function useNotifications() {
   const [notifications, setNotifications] = useState([])
 
   useEffect(() => {
-    if (profile) fetchNotifications()
+    if (profile) fetch()
   }, [profile])
 
-  useRealtime('notifications', {}, (payload) => {
+  useRealtime('notifications', (payload) => {
     if (payload.new?.user_id === profile?.id) {
       setNotifications(prev => [payload.new, ...prev])
     }
   })
 
-  async function fetchNotifications() {
+  async function fetch() {
     const { data } = await supabase
       .from('notifications')
       .select('*')
@@ -28,10 +28,15 @@ export function useNotifications() {
   }
 
   async function markAllRead() {
-    await supabase.from('notifications').update({ read: true }).eq('user_id', profile.id)
+    await supabase.from('notifications')
+      .update({ read: true })
+      .eq('user_id', profile.id)
     setNotifications(prev => prev.map(n => ({ ...n, read: true })))
   }
 
-  const unreadCount = notifications.filter(n => !n.read).length
-  return { notifications, unreadCount, markAllRead }
+  return {
+    notifications,
+    unreadCount: notifications.filter(n => !n.read).length,
+    markAllRead
+  }
 }

@@ -1,24 +1,26 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import toast from 'react-hot-toast'
 
 export default function Login() {
-  const { signIn } = useAuth()
+  const { signIn, user } = useAuth()
   const navigate = useNavigate()
-  const [email, setEmail] = useState('')
+  const [email, setEmail]       = useState('')
   const [password, setPassword] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading]   = useState(false)
+
+  // If already logged in, redirect
+  useEffect(() => {
+    if (user) navigate('/', { replace: true })
+  }, [user])
 
   async function handleSubmit(e) {
     e.preventDefault()
     setLoading(true)
     const { error } = await signIn(email, password)
-    if (error) {
-      toast.error(error.message)
-    } else {
-      navigate('/')
-    }
+    if (error) toast.error(error.message)
+    else navigate('/', { replace: true })
     setLoading(false)
   }
 
@@ -27,10 +29,10 @@ export default function Login() {
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
         <div className="text-center mb-8">
           <div className="w-14 h-14 bg-indigo-600 rounded-xl mx-auto mb-4 flex items-center justify-center">
-            <span className="text-white text-2xl font-bold">E</span>
+            <span className="text-white text-2xl font-bold">EP</span>
           </div>
           <h1 className="text-2xl font-bold text-slate-900">Employee Portal</h1>
-          <p className="text-slate-500 mt-1">Sign in to your account</p>
+          <p className="text-slate-500 mt-1 text-sm">Sign in to your account</p>
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
@@ -39,7 +41,7 @@ export default function Login() {
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
-              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition text-sm"
               placeholder="you@company.com"
               required
             />
@@ -50,7 +52,7 @@ export default function Login() {
               type="password"
               value={password}
               onChange={e => setPassword(e.target.value)}
-              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition"
+              className="w-full px-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition text-sm"
               placeholder="••••••••"
               required
             />
@@ -58,7 +60,7 @@ export default function Login() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition"
+            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-semibold py-2.5 rounded-lg transition text-sm"
           >
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
