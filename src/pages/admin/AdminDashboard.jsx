@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
 import { sendNotification } from '../../lib/notify'
@@ -17,7 +17,13 @@ export default function AdminDashboard() {
   const [unread, setUnread]               = useState(0)
   const [showNotif, setShowNotif]         = useState(false)
   const [annForm, setAnnForm]             = useState({ title: '', body: '', audience: 'all' })
-  const [updatingRole, setUpdatingRole]   = useState(null) // tracks which user is being updated
+  const [updatingRole, setUpdatingRole]   = useState(null)
+  const [updatingManager, setUpdatingManager] = useState(null)
+
+  // Derived counts — recompute every render from users state
+  const admins    = users.filter(u => u.role === 'admin')
+  const managers  = users.filter(u => u.role === 'manager')
+  const employees = users.filter(u => u.role === 'employee')
 
   useEffect(() => {
     if (profile) {
@@ -28,14 +34,17 @@ export default function AdminDashboard() {
     }
   }, [profile])
 
-  async function fetchUsers() {
+  const fetchUsers = useCallback(async () => {
     const { data, error } = await supabase
       .from('users')
       .select('*')
       .order('created_at', { ascending: true })
-    if (error) console.error('Users fetch error:', error)
-    else setUsers(data || [])
-  }
+    if (error) {
+      console.error('Users fetch error:', error)
+    } else {
+      setUsers(data || [])
+    }
+  }, [])
 
   async function fetchAuditLogs() {
     const { data } = await supabase
@@ -66,14 +75,15 @@ export default function AdminDashboard() {
   }
 
   async function updateUserRole(userId, newRole, userName) {
-    // Prevent changing own role
     if (userId === profile.id) {
       toast.error("You can't change your own role")
       return
     }
+    if (updatingRole) return // prevent double clicks
 
     setUpdatingRole(userId)
 
+    // 1. Update DB first — wait for confirmation
     const { error } = await supabase
       .from('users')
       .update({ role: newRole })
@@ -86,17 +96,24 @@ export default function AdminDashboard() {
       return
     }
 
-    // Audit log
-    await supabase.from('audit_logs').insert({
+    // 2. DB confirmed — now update local state (no fetchUsers, no stale overwrite)
+    setUsers(prev =>
+      prev.map(u => u.id === userId ? { ...u, role: newRole } : u)
+    )
+
+    // 3. Side effects (non-blocking)
+    supabase.from('audit_logs').insert({
       actor_id: profile.id,
       action: 'role_change',
       target_type: 'user',
       target_id: userId,
       metadata: { new_role: newRole, user_name: userName }
+    }).then(({ data }) => {
+      // Refresh audit log silently
+      fetchAuditLogs()
     })
 
-    // Notify the user
-    await sendNotification(
+    sendNotification(
       userId,
       'role_change',
       `Your role has been updated to "${newRole}" by ${profile.name}`
@@ -104,17 +121,30 @@ export default function AdminDashboard() {
 
     toast.success(`${userName}'s role updated to ${newRole}`)
     setUpdatingRole(null)
-    fetchUsers()
-    fetchAuditLogs()
   }
 
   async function updateManagerLink(employeeId, managerId) {
+    if (updatingManager === employeeId) return
+    setUpdatingManager(employeeId)
+
     const { error } = await supabase
       .from('users')
       .update({ manager_id: managerId || null })
       .eq('id', employeeId)
-    if (error) toast.error('Failed to update manager')
-    else { toast.success('Manager assigned!'); fetchUsers() }
+
+    if (error) {
+      toast.error('Failed to update manager: ' + error.message)
+      setUpdatingManager(null)
+      return
+    }
+
+    // Update local state directly — no fetchUsers
+    setUsers(prev =>
+      prev.map(u => u.id === employeeId ? { ...u, manager_id: managerId || null } : u)
+    )
+
+    toast.success('Manager assigned!')
+    setUpdatingManager(null)
   }
 
   async function postAnnouncement(e) {
@@ -122,8 +152,9 @@ export default function AdminDashboard() {
     const { error } = await supabase
       .from('announcements')
       .insert({ ...annForm, created_by: profile.id })
-    if (error) toast.error('Failed to post announcement')
-    else {
+    if (error) {
+      toast.error('Failed to post announcement')
+    } else {
       toast.success('Announcement posted!')
       setAnnForm({ title: '', body: '', audience: 'all' })
       fetchAnnouncements()
@@ -136,10 +167,6 @@ export default function AdminDashboard() {
     setNotifications(prev => prev.map(n => ({ ...n, read: true })))
   }
 
-  const managers   = users.filter(u => u.role === 'manager')
-  const admins     = users.filter(u => u.role === 'admin')
-  const employees  = users.filter(u => u.role === 'employee')
-
   const ROLE_COLORS = {
     admin:    'bg-purple-100 text-purple-700',
     manager:  'bg-indigo-100 text-indigo-700',
@@ -147,11 +174,11 @@ export default function AdminDashboard() {
   }
 
   const tabs = [
-    { id: 'dashboard',      label: 'Dashboard',      icon: Shield },
-    { id: 'users',          label: 'Users',           icon: Users },
-    { id: 'announcements',  label: 'Announcements',   icon: Megaphone },
-    { id: 'audit',          label: 'Audit Log',       icon: FileText },
-    { id: 'orgchart',       label: 'Org Chart',       icon: GitBranch },
+    { id: 'dashboard',     label: 'Dashboard',    icon: Shield },
+    { id: 'users',         label: 'Users',         icon: Users },
+    { id: 'announcements', label: 'Announcements', icon: Megaphone },
+    { id: 'audit',         label: 'Audit Log',     icon: FileText },
+    { id: 'orgchart',      label: 'Org Chart',     icon: GitBranch },
   ]
 
   if (!profile) return (
@@ -177,8 +204,10 @@ export default function AdminDashboard() {
         </div>
         <div className="flex items-center gap-2">
           <div className="relative">
-            <button onClick={() => { setShowNotif(!showNotif); if (!showNotif) markNotifsRead() }}
-              className="relative p-2 rounded-lg hover:bg-slate-100 transition">
+            <button
+              onClick={() => { setShowNotif(!showNotif); if (!showNotif) markNotifsRead() }}
+              className="relative p-2 rounded-lg hover:bg-slate-100 transition"
+            >
               <Bell className="w-5 h-5 text-slate-600" />
               {unread > 0 && (
                 <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center">
@@ -197,7 +226,8 @@ export default function AdminDashboard() {
                         <p className="text-slate-700">{n.message}</p>
                         <p className="text-xs text-slate-400 mt-0.5">{format(new Date(n.created_at), 'MMM d, h:mm a')}</p>
                       </div>
-                    ))}
+                    ))
+                  }
                 </div>
               </div>
             )}
@@ -212,11 +242,14 @@ export default function AdminDashboard() {
       <nav className="bg-white border-b border-slate-200 px-6">
         <div className="flex gap-1 overflow-x-auto">
           {tabs.map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-3 text-sm font-medium border-b-2 transition whitespace-nowrap
                 ${activeTab === tab.id
                   ? 'border-purple-600 text-purple-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
+                  : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+            >
               <tab.icon className="w-4 h-4" />
               {tab.label}
             </button>
@@ -229,10 +262,11 @@ export default function AdminDashboard() {
         {/* ── DASHBOARD ── */}
         {activeTab === 'dashboard' && (
           <>
+            {/* Stat cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
                 { label: 'Total Users', value: users.length,     color: 'text-purple-600', bg: 'bg-purple-50' },
-                { label: 'Admins',      value: admins.length,    color: 'text-slate-600',  bg: 'bg-slate-100' },
+                { label: 'Admins',      value: admins.length,    color: 'text-slate-700',  bg: 'bg-slate-100' },
                 { label: 'Managers',    value: managers.length,  color: 'text-indigo-600', bg: 'bg-indigo-50' },
                 { label: 'Employees',   value: employees.length, color: 'text-blue-600',   bg: 'bg-blue-50'   },
               ].map(stat => (
@@ -243,20 +277,57 @@ export default function AdminDashboard() {
               ))}
             </div>
 
-            {/* Recent audit */}
+            {/* Role distribution bar */}
             <div className="bg-white rounded-xl border border-slate-200 p-5">
-              <h3 className="font-semibold text-slate-800 mb-3">Recent Activity</h3>
+              <h3 className="font-semibold text-slate-800 mb-4">Role Distribution</h3>
+              {users.length > 0 ? (
+                <div className="space-y-3">
+                  {[
+                    { label: 'Admins',    count: admins.length,    color: 'bg-purple-500' },
+                    { label: 'Managers',  count: managers.length,  color: 'bg-indigo-500' },
+                    { label: 'Employees', count: employees.length, color: 'bg-blue-400'   },
+                  ].map(row => (
+                    <div key={row.label} className="flex items-center gap-3">
+                      <span className="text-xs text-slate-500 w-20 shrink-0">{row.label}</span>
+                      <div className="flex-1 bg-slate-100 rounded-full h-2">
+                        <div
+                          className={`${row.color} h-2 rounded-full transition-all duration-500`}
+                          style={{ width: users.length ? `${(row.count / users.length) * 100}%` : '0%' }}
+                        />
+                      </div>
+                      <span className="text-xs font-semibold text-slate-700 w-4 text-right">{row.count}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 text-center py-2">No users yet</p>
+              )}
+            </div>
+
+            {/* Recent audit activity */}
+            <div className="bg-white rounded-xl border border-slate-200 p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-semibold text-slate-800">Recent Activity</h3>
+                <button onClick={() => setActiveTab('audit')} className="text-xs text-purple-600 hover:underline">
+                  View all
+                </button>
+              </div>
               {auditLogs.slice(0, 5).length === 0
                 ? <p className="text-sm text-slate-400 text-center py-4">No activity yet</p>
                 : auditLogs.slice(0, 5).map(log => (
                   <div key={log.id} className="flex items-center justify-between py-2 border-b border-slate-50 last:border-0">
-                    <div>
-                      <span className="text-sm font-medium text-slate-800">{log.actor?.name || 'System'}</span>
-                      <span className="text-sm text-slate-500"> · {log.action.replace(/_/g, ' ')}</span>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-sm font-medium text-slate-800 truncate">{log.actor?.name || 'System'}</span>
+                      <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full shrink-0">
+                        {log.action.replace(/_/g, ' ')}
+                      </span>
                     </div>
-                    <span className="text-xs text-slate-400">{format(new Date(log.created_at), 'MMM d, h:mm a')}</span>
+                    <span className="text-xs text-slate-400 shrink-0 ml-2">
+                      {format(new Date(log.created_at), 'MMM d, h:mm a')}
+                    </span>
                   </div>
-                ))}
+                ))
+              }
             </div>
           </>
         )}
@@ -268,8 +339,8 @@ export default function AdminDashboard() {
               <h2 className="font-semibold text-slate-800">All Users ({users.length})</h2>
             </div>
 
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <table className="w-full">
+            <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+              <table className="w-full min-w-[700px]">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     {['Name', 'Email', 'Department', 'Role', 'Manager', 'Change Role'].map(h => (
@@ -309,13 +380,14 @@ export default function AdminDashboard() {
                         </span>
                       </td>
 
-                      {/* Manager dropdown (for employees only) */}
+                      {/* Manager assignment (employees only) */}
                       <td className="px-4 py-3">
                         {u.role === 'employee' ? (
                           <select
                             value={u.manager_id || ''}
+                            disabled={updatingManager === u.id}
                             onChange={e => updateManagerLink(u.id, e.target.value)}
-                            className="text-xs border border-slate-200 rounded-lg px-2 py-1 focus:ring-2 focus:ring-purple-500 outline-none max-w-[130px]"
+                            className="text-xs border border-slate-200 rounded-lg px-2 py-1 focus:ring-2 focus:ring-purple-500 outline-none max-w-[130px] disabled:opacity-50 bg-white cursor-pointer"
                           >
                             <option value="">No manager</option>
                             {managers.map(m => (
@@ -327,7 +399,7 @@ export default function AdminDashboard() {
                         )}
                       </td>
 
-                      {/* Change Role dropdown */}
+                      {/* Change Role */}
                       <td className="px-4 py-3">
                         {u.id === profile.id ? (
                           <span className="text-xs text-slate-300 italic">own account</span>
@@ -336,7 +408,7 @@ export default function AdminDashboard() {
                             value={u.role}
                             disabled={updatingRole === u.id}
                             onChange={e => updateUserRole(u.id, e.target.value, u.name)}
-                            className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-purple-500 outline-none disabled:opacity-50 disabled:cursor-wait bg-white cursor-pointer hover:border-purple-400 transition"
+                            className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-purple-500 outline-none disabled:opacity-50 disabled:cursor-wait bg-white cursor-pointer hover:border-purple-400 transition min-w-[100px]"
                           >
                             <option value="employee">employee</option>
                             <option value="manager">manager</option>
@@ -351,10 +423,9 @@ export default function AdminDashboard() {
               </table>
             </div>
 
-            {/* Helper note */}
             <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 mt-4 text-sm text-blue-700">
               <strong>Tip:</strong> Use the <em>Manager</em> column to link employees to their manager.
-              Use <em>Change Role</em> to promote/demote users. Changes are logged to the audit trail.
+              Use <em>Change Role</em> to promote or demote users. All changes are logged to the audit trail.
             </div>
           </div>
         )}
@@ -389,8 +460,10 @@ export default function AdminDashboard() {
                     <option value="managers">Managers only</option>
                     <option value="employees">Employees only</option>
                   </select>
-                  <button type="submit"
-                    className="bg-purple-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-purple-700 transition">
+                  <button
+                    type="submit"
+                    className="bg-purple-600 text-white px-5 py-2 rounded-lg text-sm font-medium hover:bg-purple-700 transition"
+                  >
                     Post
                   </button>
                 </div>
@@ -416,7 +489,8 @@ export default function AdminDashboard() {
                       </span>
                     </div>
                   </div>
-                ))}
+                ))
+              }
             </div>
           </div>
         )}
@@ -424,9 +498,17 @@ export default function AdminDashboard() {
         {/* ── AUDIT LOG ── */}
         {activeTab === 'audit' && (
           <div>
-            <h2 className="font-semibold text-slate-800 mb-4">Audit Log</h2>
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-              <table className="w-full">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-semibold text-slate-800">Audit Log</h2>
+              <button
+                onClick={fetchAuditLogs}
+                className="text-xs text-purple-600 border border-purple-200 px-3 py-1.5 rounded-lg hover:bg-purple-50 transition"
+              >
+                ↻ Refresh
+              </button>
+            </div>
+            <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+              <table className="w-full min-w-[600px]">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     {['Actor', 'Action', 'Target', 'Details', 'Time'].map(h => (
@@ -444,7 +526,7 @@ export default function AdminDashboard() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-500 capitalize">{log.target_type || '—'}</td>
-                      <td className="px-4 py-3 text-xs text-slate-400">
+                      <td className="px-4 py-3 text-xs text-slate-400 max-w-[200px] truncate">
                         {log.metadata ? JSON.stringify(log.metadata) : '—'}
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">
@@ -466,42 +548,42 @@ export default function AdminDashboard() {
           <div>
             <h2 className="font-semibold text-slate-800 mb-4">Organisation Chart</h2>
             <div className="bg-white rounded-xl border border-slate-200 p-6 overflow-x-auto min-h-[200px]">
-              {admins.map(admin => (
-                <div key={admin.id} className="flex flex-col items-center">
-                  <OrgNode user={admin} />
-                  {managers.length > 0 && <div className="w-px h-8 bg-slate-200 mt-1" />}
-                  <div className="flex gap-8 flex-wrap justify-center">
-                    {managers.map(mgr => (
-                      <div key={mgr.id} className="flex flex-col items-center">
-                        <OrgNode user={mgr} />
-                        {employees.filter(e => e.manager_id === mgr.id).length > 0 && (
-                          <div className="w-px h-8 bg-slate-200 mt-1" />
-                        )}
+              {admins.length === 0 ? (
+                <p className="text-sm text-slate-400 text-center py-8">No users yet</p>
+              ) : (
+                admins.map(admin => (
+                  <div key={admin.id} className="flex flex-col items-center">
+                    <OrgNode user={admin} />
+                    {managers.length > 0 && <div className="w-px h-8 bg-slate-200 mt-1" />}
+                    <div className="flex gap-8 flex-wrap justify-center">
+                      {managers.map(mgr => (
+                        <div key={mgr.id} className="flex flex-col items-center">
+                          <OrgNode user={mgr} />
+                          {employees.filter(e => e.manager_id === mgr.id).length > 0 && (
+                            <div className="w-px h-8 bg-slate-200 mt-1" />
+                          )}
+                          <div className="flex gap-4 flex-wrap justify-center">
+                            {employees
+                              .filter(e => e.manager_id === mgr.id)
+                              .map(emp => <OrgNode key={emp.id} user={emp} />)
+                            }
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {employees.filter(e => !e.manager_id).length > 0 && (
+                      <div className="mt-6 w-full">
+                        <p className="text-xs text-slate-400 text-center mb-3">— Unassigned employees —</p>
                         <div className="flex gap-4 flex-wrap justify-center">
                           {employees
-                            .filter(e => e.manager_id === mgr.id)
+                            .filter(e => !e.manager_id)
                             .map(emp => <OrgNode key={emp.id} user={emp} />)
                           }
                         </div>
                       </div>
-                    ))}
+                    )}
                   </div>
-                  {/* Unassigned employees */}
-                  {employees.filter(e => !e.manager_id).length > 0 && (
-                    <div className="mt-6 w-full">
-                      <p className="text-xs text-slate-400 text-center mb-3">Unassigned employees</p>
-                      <div className="flex gap-4 flex-wrap justify-center">
-                        {employees
-                          .filter(e => !e.manager_id)
-                          .map(emp => <OrgNode key={emp.id} user={emp} />)
-                        }
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-              {users.length === 0 && (
-                <p className="text-sm text-slate-400 text-center py-8">No users yet</p>
+                ))
               )}
             </div>
           </div>
