@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
-import { LogOut, Bell, CheckSquare, FileText, Calendar, TrendingUp } from 'lucide-react'
+import {
+  LogOut,
+  Bell,
+  CheckSquare,
+  FileText,
+  Calendar,
+  TrendingUp,
+  Clock
+} from 'lucide-react'
 import { Toaster } from 'react-hot-toast'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
@@ -21,12 +29,18 @@ export default function EmployeeDashboard() {
   const [secondHalf, setSecondHalf] = useState('')
   const [reportSubmitted, setReportSubmitted] = useState(false)
   const [reportId, setReportId] = useState(null)
+  const [attendance, setAttendance] = useState(null)
+  const [loadingAttendance, setLoadingAttendance] = useState(false)
 
   // Leave form state
   const [leaveForm, setLeaveForm] = useState({ start_date: '', end_date: '', reason: '' })
 
   // Task form
   const [showTaskForm, setShowTaskForm] = useState(false)
+
+  const remainingLeaves =
+  (profile?.total_leaves || 0) -
+  (profile?.used_leaves || 0)
 
   const today = format(new Date(), 'yyyy-MM-dd')
 
@@ -36,6 +50,7 @@ export default function EmployeeDashboard() {
       fetchLeaves()
       fetchTodayReport()
       fetchNotifications()
+      fetchAttendance()
     }
   }, [profile])
 
@@ -47,6 +62,61 @@ export default function EmployeeDashboard() {
       .order('created_at', { ascending: false })
     setTasks(data || [])
   }
+
+  async function clockIn() {
+  const today = new Date().toISOString().split('T')[0]
+
+  const { error } = await supabase
+    .from('attendance')
+    .insert({
+      user_id: profile.id,
+      attendance_date: today,
+      clock_in: new Date().toISOString()
+    })
+
+  if (!error) {
+    toast.success('Clocked In')
+    fetchAttendance()
+  }
+}
+
+async function clockOut() {
+
+  const clockInTime = new Date(attendance.clock_in)
+  const clockOutTime = new Date()
+
+  const hours =
+    ((clockOutTime - clockInTime) / (1000 * 60 * 60))
+      .toFixed(2)
+
+  const { error } = await supabase
+    .from('attendance')
+    .update({
+      clock_out: clockOutTime.toISOString(),
+      total_hours: hours
+    })
+    .eq('id', attendance.id)
+
+  if (!error) {
+    toast.success('Clocked Out')
+    fetchAttendance()
+  }
+}
+
+  async function fetchAttendance() {
+  if (!profile) return
+
+  const today = new Date().toISOString().split('T')[0]
+
+  const { data } = await supabase
+    .from('attendance')
+    .select('*')
+    .eq('user_id', profile.id)
+    .eq('attendance_date', today)
+    .maybeSingle()
+
+  setAttendance(data)
+}
 
   async function fetchLeaves() {
     const { data } = await supabase
@@ -100,6 +170,14 @@ export default function EmployeeDashboard() {
     const { error } = await supabase.from('leaves').insert({ user_id: profile.id, ...leaveForm })
     if (error) toast.error('Failed to apply')
     else { toast.success('Leave applied!'); setLeaveForm({ start_date: '', end_date: '', reason: '' }); fetchLeaves() }
+  if (remainingLeaves <= 0) {
+  toast.error('No leave balance remaining')
+  return
+}
+if (daysRequested > remainingLeaves) {
+   toast.error('Insufficient leave balance')
+   return
+}
   }
 
   async function updateTaskStatus(taskId, status) {
@@ -124,6 +202,7 @@ export default function EmployeeDashboard() {
     { id: 'tasks', label: 'Tasks', icon: CheckSquare },
     { id: 'reports', label: 'Report', icon: FileText },
     { id: 'leave', label: 'Leave', icon: Calendar },
+    { id: 'attendance', label: 'Attendance', icon: Clock },
   ]
 
   return (
@@ -197,8 +276,8 @@ export default function EmployeeDashboard() {
               {[
                 { label: 'Open Tasks', value: tasks.filter(t => t.status !== 'done').length, color: 'text-indigo-600', bg: 'bg-indigo-50' },
                 { label: 'Completed', value: tasks.filter(t => t.status === 'done').length, color: 'text-emerald-600', bg: 'bg-emerald-50' },
-                { label: 'Leaves Taken', value: leaves.filter(l => l.status === 'approved').length, color: 'text-orange-600', bg: 'bg-orange-50' },
-                { label: 'Pending Leaves', value: leaves.filter(l => l.status === 'pending').length, color: 'text-yellow-600', bg: 'bg-yellow-50' },
+                { label: 'Allocated Leaves', value: profile?.total_leaves || 0, color: 'text-blue-600', bg: 'bg-blue-50' },
+                { label: 'Remaining Leaves', value: remainingLeaves, color: 'text-green-600', bg: 'bg-green-50' }
               ].map(stat => (
                 <div key={stat.label} className={`${stat.bg} rounded-xl p-4 text-center`}>
                   <div className={`text-3xl font-bold ${stat.color}`}>{stat.value}</div>
@@ -368,8 +447,124 @@ export default function EmployeeDashboard() {
                   </div>
                 )}
             </div>
+
+            <div className="bg-white rounded-xl border border-slate-200 p-5">
+
+  <h3 className="font-semibold text-slate-800 mb-4">
+    Leave Balance
+  </h3>
+
+  <div className="grid grid-cols-3 gap-4">
+
+    <div className="text-center">
+      <div className="text-2xl font-bold text-blue-600">
+        {profile?.total_leaves || 0}
+      </div>
+      <div className="text-xs text-slate-500">
+        Allocated
+      </div>
+    </div>
+
+    <div className="text-center">
+      <div className="text-2xl font-bold text-orange-600">
+        {profile?.used_leaves || 0}
+      </div>
+      <div className="text-xs text-slate-500">
+        Used
+      </div>
+    </div>
+
+    <div className="text-center">
+      <div className="text-2xl font-bold text-green-600">
+        {remainingLeaves}
+      </div>
+      <div className="text-xs text-slate-500">
+        Remaining
+      </div>
+    </div>
+
+  </div>
+
+</div>
           </div>
+
         )}
+
+        {activeTab === 'attendance' && (
+  <div className="space-y-6">
+
+    <div className="bg-white rounded-xl border border-slate-200 p-6">
+
+      <h3 className="text-lg font-semibold mb-4">
+        Attendance
+      </h3>
+
+      <div className="space-y-3">
+
+        <p>
+          Status:
+          {' '}
+          {attendance?.clock_out
+            ? 'Completed'
+            : attendance?.clock_in
+            ? 'Clocked In'
+            : 'Not Started'}
+        </p>
+
+        <p>
+          Clock In:
+          {' '}
+          {attendance?.clock_in
+            ? new Date(attendance.clock_in)
+                .toLocaleTimeString()
+            : '--'}
+        </p>
+
+        <p>
+          Clock Out:
+          {' '}
+          {attendance?.clock_out
+            ? new Date(attendance.clock_out)
+                .toLocaleTimeString()
+            : '--'}
+        </p>
+
+        <p>
+          Hours Worked:
+          {' '}
+          {attendance?.total_hours || '0'}
+        </p>
+
+      </div>
+
+      <div className="flex gap-3 mt-5">
+
+        {!attendance && (
+          <button
+            onClick={clockIn}
+            className="bg-green-600 text-white px-4 py-2 rounded-lg"
+          >
+            Clock In
+          </button>
+        )}
+
+        {attendance &&
+          attendance.clock_in &&
+          !attendance.clock_out && (
+          <button
+            onClick={clockOut}
+            className="bg-red-600 text-white px-4 py-2 rounded-lg"
+          >
+            Clock Out
+          </button>
+        )}
+
+      </div>
+
+    </div>
+
+  </div>
+)}
 
       </main>
     </div>

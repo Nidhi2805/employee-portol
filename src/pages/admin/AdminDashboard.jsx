@@ -2,7 +2,16 @@ import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../../context/AuthContext'
 import { supabase } from '../../lib/supabase'
 import { sendNotification } from '../../lib/notify'
-import { LogOut, Bell, Users, Shield, FileText, Megaphone, GitBranch } from 'lucide-react'
+import {
+  LogOut,
+  Bell,
+  Users,
+  Shield,
+  FileText,
+  Megaphone,
+  GitBranch,
+  Calendar
+} from 'lucide-react'
 import { Toaster } from 'react-hot-toast'
 import toast from 'react-hot-toast'
 import { format } from 'date-fns'
@@ -54,6 +63,23 @@ export default function AdminDashboard() {
       .limit(50)
     setAuditLogs(data || [])
   }
+
+  async function updateLeaves(userId, totalLeaves) {
+
+  const { error } = await supabase
+    .from('users')
+    .update({
+      total_leaves: totalLeaves
+    })
+    .eq('id', userId)
+
+  if (error) {
+    toast.error('Failed to update leaves')
+  } else {
+    toast.success('Leave allocation updated')
+    fetchUsers()
+  }
+}
 
   async function fetchAnnouncements() {
     const { data } = await supabase
@@ -179,6 +205,7 @@ export default function AdminDashboard() {
     { id: 'announcements', label: 'Announcements', icon: Megaphone },
     { id: 'audit',         label: 'Audit Log',     icon: FileText },
     { id: 'orgchart',      label: 'Org Chart',     icon: GitBranch },
+    { id:'leaveAllocation', label: 'Leave Allocation', icon: Calendar },
   ]
 
   if (!profile) return (
@@ -494,6 +521,99 @@ export default function AdminDashboard() {
             </div>
           </div>
         )}
+
+        {activeTab === 'leaveAllocation' && (
+  <div>
+
+    <h2 className="font-semibold text-slate-800 mb-4">
+      Leave Allocation
+    </h2>
+
+    <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+
+      <table className="w-full">
+
+        <thead className="bg-slate-50 border-b border-slate-200">
+          <tr>
+            <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">
+              Employee
+            </th>
+
+            <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">
+              Department
+            </th>
+
+            <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">
+              Total Leaves
+            </th>
+
+            <th className="text-left text-xs font-semibold text-slate-500 px-4 py-3">
+              Action
+            </th>
+          </tr>
+        </thead>
+
+        <tbody>
+
+          {users
+            .filter(user => user.role === 'employee')
+            .map(user => (
+
+            <tr
+              key={user.id}
+              className="border-b border-slate-50"
+            >
+
+              <td className="px-4 py-3 text-sm font-medium text-slate-800">
+                {user.name}
+              </td>
+
+              <td className="px-4 py-3 text-sm text-slate-500">
+                {user.department || '—'}
+              </td>
+
+              <td className="px-4 py-3">
+
+                <input
+                  type="number"
+                  min="0"
+                  defaultValue={user.total_leaves || 24}
+                  id={`leave-${user.id}`}
+                  className="w-24 border border-slate-200 rounded-lg px-2 py-1 text-sm"
+                />
+
+              </td>
+
+              <td className="px-4 py-3">
+
+                <button
+                  onClick={() =>
+                    updateLeaves(
+                      user.id,
+                      parseInt(
+                        document.getElementById(`leave-${user.id}`).value
+                      )
+                    )
+                  }
+                  className="bg-indigo-600 text-white px-3 py-1 rounded-lg text-xs hover:bg-indigo-700"
+                >
+                  Save
+                </button>
+
+              </td>
+
+            </tr>
+
+          ))}
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+  </div>
+)}
 
         {/* ── AUDIT LOG ── */}
         {activeTab === 'audit' && (
