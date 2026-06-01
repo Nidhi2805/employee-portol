@@ -24,6 +24,8 @@ export default function ManagerDashboard() {
 
   const today = format(new Date(), 'yyyy-MM-dd')
 
+  
+
   useEffect(() => {
     if (profile) {
       fetchTeam()
@@ -35,20 +37,84 @@ export default function ManagerDashboard() {
     }
   }, [profile])
 
+  
+
+useEffect(() => {
+  const channel = supabase
+    .channel('attendance-updates')
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'attendance'
+      },
+      () => fetchAttendance()
+    )
+    .subscribe()
+
+  return () => {
+    supabase.removeChannel(channel)
+  }
+}, [])
+
+useEffect(() => {
+
+ const channel = supabase
+   .channel('report-updates')
+   .on(
+      'postgres_changes',
+      {
+        event:'*',
+        schema:'public',
+        table:'daily_reports'
+      },
+      () => {
+         fetchTodayReport()
+         fetchReportHistory()
+      }
+   )
+   .subscribe()
+
+ return () => {
+   supabase.removeChannel(channel)
+ }
+
+}, [])
+
   async function fetchTeam() {
     const { data } = await supabase.from('users').select('*').eq('manager_id', profile.id)
     setTeam(data || [])
   }
 
   async function fetchReports() {
-    const { data } = await supabase
-      .from('daily_reports')
-      .select('*, user:user_id(name, email)')
-      .in('user_id', (await supabase.from('users').select('id').eq('manager_id', profile.id)).data?.map(u => u.id) || [])
-      .eq('date', today)
-      .order('created_at', { ascending: false })
+
+  // Get employees under this manager
+  const { data: teamMembers } = await supabase
+    .from('users')
+    .select('id')
+    .eq('manager_id', profile.id)
+
+  const teamIds = teamMembers?.map(t => t.id) || []
+
+  // Get reports only for team members
+  const { data, error } = await supabase
+    .from('daily_reports')
+    .select(`
+      *,
+      user:user_id(
+        id,
+        name,
+        email
+      )
+    `)
+    .in('user_id', teamIds)
+    .order('date', { ascending: false })
+
+  if (!error) {
     setReports(data || [])
   }
+}
 
   async function fetchLeaves() {
     const teamIds = (await supabase.from('users').select('id').eq('manager_id', profile.id)).data?.map(u => u.id) || []
@@ -103,14 +169,92 @@ export default function ManagerDashboard() {
   }
 
   async function reviewLeave(leaveId, status) {
-    const { error } = await supabase.from('leaves').update({ status, reviewed_by: profile.id, reviewed_at: new Date().toISOString() }).eq('id', leaveId)
-    if (!error) { toast.success(`Leave ${status}`); fetchLeaves() }
+
+  const { error } = await supabase
+    .from('leaves')
+    .update({
+      status,
+      reviewed_by: profile.id,
+      reviewed_at: new Date().toISOString()
+    })
+    .eq('id', leaveId)
+
+  if (!error) {
+
+    // UPDATE USED LEAVES WHEN APPROVED
+
+      if (status === 'approved') {
+
+  const { data: leave } = await supabase
+    .from('leaves')
+    .select('*')
+    .eq('id', leaveId)
+    .single()
+
+  const { data: user } = await supabase
+    .from('users')
+    .select('used_leaves')
+    .eq('id', leave.user_id)
+    .single()
+
+  // Calculate number of leave days
+  const start = new Date(leave.start_date)
+  const end = new Date(leave.end_date)
+
+  const days =
+    Math.ceil(
+      (end - start) / (1000 * 60 * 60 * 24)
+    ) + 1
+
+  await supabase
+    .from('users')
+    .update({
+      used_leaves: (user.used_leaves || 0) + days
+    })
+    .eq('id', leave.user_id)
+}
+
+      await supabase
+  .from('notifications')
+  .insert({
+    user_id: leave.user_id,
+    message: `Your leave request was ${status}.`
+  })
+
+    toast.success(`Leave ${status}`)
+    fetchLeaves()
   }
+}
 
   async function reviewReport(reportId, comment) {
-    await supabase.from('daily_reports').update({ status: 'reviewed', manager_comment: comment }).eq('id', reportId)
-    toast.success('Report reviewed'); fetchReports()
+
+  const { data: report, error } = await supabase
+    .from('daily_reports')
+    .update({
+      status: 'reviewed',
+      manager_comment: comment,
+      reviewed_by: profile.id
+    })
+    .eq('id', reportId)
+    .select()
+    .single()
+
+  if (error) {
+    toast.error('Failed to review report')
+    return
   }
+
+  // Send notification to employee
+  await supabase
+    .from('notifications')
+    .insert({
+      user_id: report.user_id,
+      message: 'Your daily report was reviewed by your manager.'
+    })
+
+  toast.success('Report reviewed')
+  fetchReports()
+}
 
   async function createTask(e) {
     e.preventDefault()
@@ -250,40 +394,26 @@ export default function ManagerDashboard() {
 
         {/* REPORTS TAB */}
         {activeTab === 'reports' && (
-          <div>
-            <h2 className="font-semibold text-slate-800 mb-4">Today's Reports — {format(new Date(), 'MMMM d, yyyy')}</h2>
-            {reports.length === 0
-              ? <p className="text-sm text-slate-400 text-center py-10">No reports submitted today</p>
-              : reports.map(report => (
-                <ReportCard key={report.id} report={report} onReview={reviewReport} />
-              ))}
-          </div>
-        )}
+  <div>
+    <h2 className="font-semibold text-slate-800 mb-4">
+      Team Reports
+    </h2>
 
-        {/* LEAVES TAB */}
-        {activeTab === 'leaves' && (
-          <div>
-            <h2 className="font-semibold text-slate-800 mb-4">Leave Approvals</h2>
-            {leaves.length === 0
-              ? <p className="text-sm text-slate-400 text-center py-10">No pending leave requests</p>
-              : leaves.map(leave => (
-                <div key={leave.id} className="bg-white border border-slate-200 rounded-xl p-4 mb-3">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <p className="font-semibold text-slate-800">{leave.user?.name}</p>
-                      <p className="text-sm text-slate-500 mt-0.5">{leave.start_date} → {leave.end_date}</p>
-                      {leave.reason && <p className="text-sm text-slate-600 mt-1 bg-slate-50 rounded-lg px-3 py-2">"{leave.reason}"</p>}
-                    </div>
-                    <div className="flex gap-2 shrink-0">
-                      <button onClick={() => reviewLeave(leave.id, 'approved')} className="text-sm bg-emerald-500 text-white px-4 py-1.5 rounded-lg hover:bg-emerald-600 transition">Approve</button>
-                      <button onClick={() => reviewLeave(leave.id, 'rejected')} className="text-sm bg-red-500 text-white px-4 py-1.5 rounded-lg hover:bg-red-600 transition">Reject</button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-          </div>
-        )}
-
+    {reports.length === 0 ? (
+      <p className="text-sm text-slate-400 text-center py-10">
+        No reports submitted yet
+      </p>
+    ) : (
+      reports.map(report => (
+        <ReportCard
+          key={report.id}
+          report={report}
+          onReview={reviewReport}
+        />
+      ))
+    )}
+  </div>
+)}
         {/* TASKS TAB */}
         {activeTab === 'tasks' && (
           <div>

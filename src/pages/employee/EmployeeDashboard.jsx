@@ -30,7 +30,9 @@ export default function EmployeeDashboard() {
   const [reportSubmitted, setReportSubmitted] = useState(false)
   const [reportId, setReportId] = useState(null)
   const [attendance, setAttendance] = useState(null)
+  const [attendanceHistory, setAttendanceHistory] = useState([])
   const [loadingAttendance, setLoadingAttendance] = useState(false)
+  const [reportHistory, setReportHistory] = useState([])
 
   // Leave form state
   const [leaveForm, setLeaveForm] = useState({ start_date: '', end_date: '', reason: '' })
@@ -51,17 +53,119 @@ export default function EmployeeDashboard() {
       fetchTodayReport()
       fetchNotifications()
       fetchAttendance()
+      fetchReportHistory()
+      fetchAttendanceHistory()
     }
   }, [profile])
+
+  useEffect(() => {
+  if (!profile) return
+
+  const channel = supabase
+    .channel(`leaves-employee-${profile.id}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'leaves',
+        filter: `user_id=eq.${profile.id}`,
+      },
+      (payload) => {
+        setLeaves(prev =>
+          prev.map(l =>
+            l.id === payload.new.id
+              ? { ...l, ...payload.new }
+              : l
+          )
+        )
+        if (
+          payload.new.status === 'approved' ||
+          payload.new.status === 'rejected'
+        ) {
+          fetchProfile()
+        }
+      }
+    )
+    .subscribe()
+
+  return () => {
+    supabase.removeChannel(channel)
+  }
+}, [profile])
+
+  useEffect(() => {
+
+ const channel = supabase
+   .channel('attendance')
+
+   .on(
+     'postgres_changes',
+     {
+       event: '*',
+       schema: 'public',
+       table: 'attendance'
+     },
+     () => {
+       fetchAttendance()
+       fetchAttendanceHistory()
+     }
+   )
+
+   .subscribe()
+
+ return () => {
+   supabase.removeChannel(channel)
+ }
+
+}, [])
+
+  async function fetchProfile() {
+
+  const { data } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', profile.id)
+    .single()
+
+  if (data) {
+    window.location.reload()
+  }
+}
 
   async function fetchTasks() {
     const { data } = await supabase
       .from('tasks')
-      .select('*')
+      .select(`
+        *,
+        reviewer:reviewed_by(
+          name
+        )
+      `)
       .eq('assigned_to', profile.id)
       .order('created_at', { ascending: false })
     setTasks(data || [])
   }
+
+  async function fetchReportHistory() {
+
+  const { data, error } = await supabase
+    .from('daily_reports')
+    .select(`
+      id,
+      date,
+      status,
+      manager_comment,
+      first_half,
+      second_half
+    `)
+    .eq('user_id', profile.id)
+    .order('date', { ascending: false })
+
+  if (!error) {
+    setReportHistory(data || [])
+  }
+}
 
   async function clockIn() {
   const today = new Date().toISOString().split('T')[0]
@@ -77,6 +181,7 @@ export default function EmployeeDashboard() {
   if (!error) {
     toast.success('Clocked In')
     fetchAttendance()
+    fetchAttendanceHistory()
   }
 }
 
@@ -100,6 +205,7 @@ async function clockOut() {
   if (!error) {
     toast.success('Clocked Out')
     fetchAttendance()
+    fetchAttendanceHistory()
   }
 }
 
@@ -116,6 +222,18 @@ async function clockOut() {
     .maybeSingle()
 
   setAttendance(data)
+}
+
+async function fetchAttendanceHistory() {
+  const { data } = await supabase
+    .from('attendance')
+    .select('*')
+    .eq('user_id', profile.id)
+    .order('attendance_date', {
+      ascending: false
+    })
+
+  setAttendanceHistory(data || [])
 }
 
   async function fetchLeaves() {
@@ -166,19 +284,56 @@ async function clockOut() {
   }
 
   async function applyLeave(e) {
-    e.preventDefault()
-    const { error } = await supabase.from('leaves').insert({ user_id: profile.id, ...leaveForm })
-    if (error) toast.error('Failed to apply')
-    else { toast.success('Leave applied!'); setLeaveForm({ start_date: '', end_date: '', reason: '' }); fetchLeaves() }
+  e.preventDefault()
+
+  if (!profile) return
+
+  const start = new Date(leaveForm.start_date)
+  const end = new Date(leaveForm.end_date)
+
+  const daysRequested =
+    Math.ceil(
+      (end - start) / (1000 * 60 * 60 * 24)
+    ) + 1
+
   if (remainingLeaves <= 0) {
-  toast.error('No leave balance remaining')
-  return
-}
-if (daysRequested > remainingLeaves) {
-   toast.error('Insufficient leave balance')
-   return
-}
+    toast.error('No leave balance remaining')
+    return
   }
+
+  if (daysRequested > remainingLeaves) {
+    toast.error(
+      `You only have ${remainingLeaves} leave(s) remaining`
+    )
+    return
+  }
+
+  const { error } = await supabase
+    .from('leaves')
+    .insert({
+      user_id: profile.id,
+      start_date: leaveForm.start_date,
+      end_date: leaveForm.end_date,
+      reason: leaveForm.reason,
+      status: 'pending'
+    })
+
+  if (error) {
+    toast.error('Failed to apply for leave')
+    console.error(error)
+    return
+  }
+
+  toast.success('Leave application submitted')
+
+  setLeaveForm({
+    start_date: '',
+    end_date: '',
+    reason: ''
+  })
+
+  fetchLeaves()
+}
 
   async function updateTaskStatus(taskId, status) {
     await supabase.from('tasks').update({ status }).eq('id', taskId)
@@ -277,7 +432,8 @@ if (daysRequested > remainingLeaves) {
                 { label: 'Open Tasks', value: tasks.filter(t => t.status !== 'done').length, color: 'text-indigo-600', bg: 'bg-indigo-50' },
                 { label: 'Completed', value: tasks.filter(t => t.status === 'done').length, color: 'text-emerald-600', bg: 'bg-emerald-50' },
                 { label: 'Allocated Leaves', value: profile?.total_leaves || 0, color: 'text-blue-600', bg: 'bg-blue-50' },
-                { label: 'Remaining Leaves', value: remainingLeaves, color: 'text-green-600', bg: 'bg-green-50' }
+                { label: 'Remaining Leaves', value: remainingLeaves, color: 'text-green-600', bg: 'bg-green-50' },
+                { label: 'Used Leaves', value: profile?.used_leaves || 0, color: 'text-orange-600', bg: 'bg-orange-50' }
               ].map(stat => (
                 <div key={stat.label} className={`${stat.bg} rounded-xl p-4 text-center`}>
                   <div className={`text-3xl font-bold ${stat.color}`}>{stat.value}</div>
@@ -285,18 +441,7 @@ if (daysRequested > remainingLeaves) {
                 </div>
               ))}
             </div>
-
-            {/* Today's Report Status */}
-            <div className={`rounded-xl border-2 p-4 flex items-center justify-between ${reportSubmitted ? 'bg-emerald-50 border-emerald-200' : 'bg-yellow-50 border-yellow-200'}`}>
-              <div>
-                <p className="font-semibold text-sm text-slate-800">Today's Work Report</p>
-                <p className="text-xs text-slate-500 mt-0.5">{format(new Date(), 'EEEE, MMMM d')}</p>
-              </div>
-              {reportSubmitted
-                ? <span className="text-xs bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full font-medium">✓ Submitted</span>
-                : <button onClick={() => setActiveTab('reports')} className="text-xs bg-yellow-500 text-white px-3 py-1 rounded-full font-medium hover:bg-yellow-600 transition">Submit Now</button>
-              }
-            </div>
+            
 
             {/* Recent Tasks */}
             <div>
@@ -394,6 +539,76 @@ if (daysRequested > remainingLeaves) {
                 <span>✓</span> Report submitted for today
               </div>
             )}
+            <div className={`rounded-xl border-2 p-4 flex items-center justify-between ${reportSubmitted ? 'bg-emerald-50 border-emerald-200' : 'bg-yellow-50 border-yellow-200'}`}>
+              <div>
+                <p className="font-semibold text-sm text-slate-800">Today's Work Report</p>
+                <p className="text-xs text-slate-500 mt-0.5">{format(new Date(), 'EEEE, MMMM d')}</p>
+              </div>
+              {reportSubmitted
+                ? <span className="text-xs bg-emerald-100 text-emerald-700 px-3 py-1 rounded-full font-medium">✓ Submitted</span>
+                : <button onClick={() => setActiveTab('reports')} className="text-xs bg-yellow-500 text-white px-3 py-1 rounded-full font-medium hover:bg-yellow-600 transition">Submit Now</button>
+              }
+              <div className="bg-white rounded-xl border border-slate-200 p-5 mt-6">
+
+  <h3 className="font-semibold text-slate-800 mb-4">
+    Report History
+  </h3>
+
+  {reportHistory.length === 0 ? (
+    <p className="text-sm text-slate-400">
+      No reports yet
+    </p>
+  ) : (
+    <div className="space-y-3">
+
+      {reportHistory.map(report => (
+
+        <div
+          key={report.id}
+          className="border border-slate-200 rounded-lg p-4"
+        >
+
+          <div className="flex justify-between mb-2">
+
+            <span className="font-medium">
+              {report.date}
+            </span>
+
+            <span className={`text-xs px-2 py-1 rounded-full ${
+              report.status === 'reviewed'
+                ? 'bg-green-100 text-green-700'
+                : 'bg-yellow-100 text-yellow-700'
+            }`}>
+              {report.status}
+            </span>
+
+          </div>
+
+          {report.manager_comment ? (
+  <div className="bg-indigo-50 rounded-lg p-3 mt-2">
+  <p className="font-medium">
+    Manager Feedback
+  </p>
+
+  <p>
+    {report.manager_comment}
+  </p>
+</div>
+) : (
+  <p className="text-sm text-slate-400">
+    No manager feedback yet
+  </p>
+)}
+
+        </div>
+
+      ))}
+
+    </div>
+  )}
+
+</div>
+            </div>
           </div>
         )}
 
@@ -539,28 +754,105 @@ if (daysRequested > remainingLeaves) {
 
       <div className="flex gap-3 mt-5">
 
-        {!attendance && (
-          <button
-            onClick={clockIn}
-            className="bg-green-600 text-white px-4 py-2 rounded-lg"
-          >
-            Clock In
-          </button>
-        )}
+        {!attendance ? (
 
-        {attendance &&
-          attendance.clock_in &&
-          !attendance.clock_out && (
-          <button
-            onClick={clockOut}
-            className="bg-red-600 text-white px-4 py-2 rounded-lg"
-          >
-            Clock Out
-          </button>
-        )}
+  <button
+    onClick={clockIn}
+    className="bg-green-600 text-white px-4 py-2 rounded-lg"
+  >
+    Clock In
+  </button>
+
+) : !attendance.clock_out ? (
+
+  <button
+    onClick={clockOut}
+    className="bg-red-600 text-white px-4 py-2 rounded-lg"
+  >
+    Clock Out
+  </button>
+
+) : (
+
+  <span className="bg-emerald-100 text-emerald-700 px-4 py-2 rounded-lg font-medium">
+    Attendance Completed
+  </span>
+
+)}
 
       </div>
+        <div className="bg-white rounded-xl border border-slate-200 p-6 mt-6">
 
+  <h3 className="font-semibold text-slate-800 mb-4">
+    Attendance History
+  </h3>
+
+  {attendanceHistory.length === 0 ? (
+
+    <p className="text-sm text-slate-400">
+      No attendance records found
+    </p>
+
+  ) : (
+
+    <div className="overflow-x-auto">
+
+      <table className="w-full">
+
+        <thead>
+          <tr className="border-b">
+            <th className="text-left py-2">Date</th>
+            <th className="text-left py-2">Clock In</th>
+            <th className="text-left py-2">Clock Out</th>
+            <th className="text-left py-2">Hours</th>
+          </tr>
+        </thead>
+
+        <tbody>
+
+          {attendanceHistory.map(record => (
+
+            <tr key={record.id} className="border-b">
+
+              <td className="py-3">
+                {record.attendance_date}
+              </td>
+
+              <td>
+                {record.clock_in
+                  ? format(
+                      new Date(record.clock_in),
+                      'hh:mm a'
+                    )
+                  : '--'}
+              </td>
+
+              <td>
+                {record.clock_out
+                  ? format(
+                      new Date(record.clock_out),
+                      'hh:mm a'
+                    )
+                  : '--'}
+              </td>
+
+              <td>
+                {record.total_hours || 0}
+              </td>
+
+            </tr>
+
+          ))}
+
+        </tbody>
+
+      </table>
+
+    </div>
+
+  )}
+
+</div>
     </div>
 
   </div>
