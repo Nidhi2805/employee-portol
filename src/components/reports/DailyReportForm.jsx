@@ -1,120 +1,138 @@
-import { useState, useEffect } from 'react'
-import { supabase } from '../../lib/supabase'
-import { useAuth } from '../../context/AuthContext'
-import { format } from 'date-fns'
-import toast from 'react-hot-toast'
+import { useState, useEffect } from "react";
+import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../context/AuthContext";
+import { today } from "../../lib/utils";
+import Card from "../ui/Card";
+import Button from "../ui/Button";
+import { ClipboardList, CheckCircle } from "lucide-react";
+import toast from "react-hot-toast";
 
 export default function DailyReportForm() {
-  const { profile } = useAuth()
-  const today = format(new Date(), 'yyyy-MM-dd')
-  const [firstHalf, setFirstHalf] = useState('')
-  const [secondHalf, setSecondHalf] = useState('')
-  const [submitted, setSubmitted] = useState(false)
-  const [reportId, setReportId] = useState(null)
+  const { profile } = useAuth();
+  const [report, setReport]       = useState(null);
+  const [firstHalf, setFirstHalf] = useState("");
+  const [secondHalf, setSecondHalf] = useState("");
+  const [loading, setLoading]     = useState(true);
+  const [saving, setSaving]       = useState(false);
 
   useEffect(() => {
-    fetchTodayReport()
-  }, [profile])
+    if (!profile) return;
+    fetchReport();
+  }, [profile]);
 
-  async function fetchTodayReport() {
-    if (!profile) return
+  const fetchReport = async () => {
+    setLoading(true);
     const { data } = await supabase
-      .from('daily_reports')
-      .select('*')
-      .eq('user_id', profile.id)
-      .eq('date', today)
-      .single()
+      .from("daily_reports")
+      .select("*")
+      .eq("user_id", profile.id)
+      .eq("date", today())
+      .maybeSingle();
 
     if (data) {
-      setFirstHalf(data.first_half || '')
-      setSecondHalf(data.second_half || '')
-      setSubmitted(data.status === 'submitted' || data.status === 'reviewed')
-      setReportId(data.id)
+      setReport(data);
+      setFirstHalf(data.first_half || "");
+      setSecondHalf(data.second_half || "");
     }
-  }
+    setLoading(false);
+  };
 
-  async function handleSave(status = 'draft') {
-    if (!profile) return
-
-    const payload = {
-      user_id: profile.id,
-      date: today,
-      first_half: firstHalf,
-      second_half: secondHalf,
-      status,
+  const handleSubmit = async () => {
+    if (!firstHalf.trim() && !secondHalf.trim()) {
+      toast.error("Please fill in at least one section");
+      return;
     }
+    setSaving(true);
 
-    if (reportId) {
-      await supabase.from('daily_reports').update(payload).eq('id', reportId)
+    if (report) {
+      // Update existing
+      const { error } = await supabase
+        .from("daily_reports")
+        .update({ first_half: firstHalf, second_half: secondHalf })
+        .eq("id", report.id);
+      if (error) toast.error("Failed to update report");
+      else { toast.success("Report updated!"); fetchReport(); }
     } else {
-      const { data } = await supabase.from('daily_reports').insert(payload).select().single()
-      setReportId(data?.id)
+      // Insert new
+      const { error } = await supabase
+        .from("daily_reports")
+        .insert({
+          user_id:      profile.id,
+          manager_id:   profile.manager_id || null,
+          date:         today(),
+          first_half:   firstHalf,
+          second_half:  secondHalf,
+          status:       "pending",
+        });
+      if (error) toast.error("Failed to submit report");
+      else { toast.success("Report submitted! ✅"); fetchReport(); }
     }
+    setSaving(false);
+  };
 
-    if (status === 'submitted') {
-      setSubmitted(true)
-      toast.success('Report submitted!')
-    } else {
-      toast.success('Draft saved')
-    }
-  }
+  if (loading) return (
+    <Card className="h-48 flex items-center justify-center">
+      <div className="animate-spin h-5 w-5 border-2 border-primary-600 border-t-transparent rounded-full" />
+    </Card>
+  );
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-slate-800">Daily Work Report</h3>
-        <span className="text-xs text-slate-400">{format(new Date(), 'MMMM d, yyyy')}</span>
+    <Card className="flex flex-col gap-4">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 font-semibold text-gray-700">
+          <ClipboardList size={18} className="text-primary-600" />
+          Today's Work Report
+        </div>
+        {report && (
+          <span className={`text-xs px-2 py-0.5 rounded-full font-medium
+            ${report.status === "reviewed"
+              ? "bg-green-100 text-green-700"
+              : "bg-yellow-100 text-yellow-700"}`}>
+            {report.status}
+          </span>
+        )}
       </div>
 
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-slate-600 mb-1">
-            First Half (Morning)
-          </label>
-          <textarea
-            value={firstHalf}
-            onChange={e => setFirstHalf(e.target.value)}
-            disabled={submitted}
-            rows={3}
-            placeholder="What did you work on in the first half?"
-            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none disabled:bg-slate-50 disabled:text-slate-400"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium text-slate-600 mb-1">
-            Second Half (Afternoon)
-          </label>
-          <textarea
-            value={secondHalf}
-            onChange={e => setSecondHalf(e.target.value)}
-            disabled={submitted}
-            rows={3}
-            placeholder="What did you work on in the second half?"
-            className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none resize-none disabled:bg-slate-50 disabled:text-slate-400"
-          />
-        </div>
-      </div>
-
-      {!submitted ? (
-        <div className="flex gap-2 mt-4">
-          <button
-            onClick={() => handleSave('draft')}
-            className="px-4 py-2 text-sm border border-slate-200 rounded-lg hover:bg-slate-50 transition"
-          >
-            Save Draft
-          </button>
-          <button
-            onClick={() => handleSave('submitted')}
-            className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
-          >
-            Submit Report
-          </button>
-        </div>
-      ) : (
-        <div className="mt-4 flex items-center gap-2 text-emerald-600 text-sm">
-          <span>✓</span> Report submitted for today
+      {/* Manager comment */}
+      {report?.manager_comment && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-800">
+          <p className="font-medium mb-0.5">Manager's comment:</p>
+          <p>{report.manager_comment}</p>
         </div>
       )}
-    </div>
-  )
+
+      <div className="flex flex-col gap-3">
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            First Half Update
+          </label>
+          <textarea
+            rows={3}
+            value={firstHalf}
+            onChange={(e) => setFirstHalf(e.target.value)}
+            placeholder="What did you work on this morning?"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Second Half Update
+          </label>
+          <textarea
+            rows={3}
+            value={secondHalf}
+            onChange={(e) => setSecondHalf(e.target.value)}
+            placeholder="What did you complete this afternoon?"
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+          />
+        </div>
+      </div>
+
+      <Button onClick={handleSubmit} loading={saving} className="self-end">
+        <CheckCircle size={15} />
+        {report ? "Update Report" : "Submit Report"}
+      </Button>
+    </Card>
+  );
 }
