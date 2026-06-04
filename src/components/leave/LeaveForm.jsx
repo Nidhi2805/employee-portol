@@ -11,7 +11,6 @@ export default function LeaveForm({ onSuccess }) {
     e.preventDefault()
     const { error } = await supabase.from('leaves').insert({
       user_id: profile.id,
-      manager_id: profile.manager_id || null,
       ...form,
       status: 'pending',
     })

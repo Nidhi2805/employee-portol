@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../context/AuthContext";
 import Card from "../ui/Card";
@@ -10,12 +10,8 @@ export default function LeaveSummaryWidget() {
   const [pending, setPending]   = useState(0);
   const [loading, setLoading]   = useState(true);
 
-  useEffect(() => {
+  const fetchData = useCallback(async () => {
     if (!profile) return;
-    fetchData();
-  }, [profile]);
-
-  const fetchData = async () => {
     setLoading(true);
     const [{ data: bal }, { count }] = await Promise.all([
       supabase
@@ -32,7 +28,11 @@ export default function LeaveSummaryWidget() {
     setBalance(bal);
     setPending(count || 0);
     setLoading(false);
-  };
+  }, [profile]);
+
+  useEffect(() => {
+    if (profile) fetchData();
+  }, [profile, fetchData]);
 
   const leaveTypes = balance
     ? [

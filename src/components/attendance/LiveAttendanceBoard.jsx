@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabase";
+import { fetchTeamMembers } from "../../lib/team";
 import { useAuth } from "../../context/AuthContext";
 import { useRealtime } from "../../hooks/useRealtime";
 import { formatTime } from "../../lib/utils";
@@ -18,12 +19,8 @@ export default function LiveAttendanceBoard() {
   // Step 1: load team members
   const fetchTeam = useCallback(async () => {
     if (!profile) return;
-    const { data } = await supabase
-      .from("users")
-      .select("id, name, position, department")
-      .eq("manager_id", profile.id)
-      .eq("is_active", true);
-    if (data) setTeam(data);
+    const { team, error } = await fetchTeamMembers(profile.id);
+    if (!error) setTeam(team);
   }, [profile]);
 
   // Step 2: load today's attendance for team

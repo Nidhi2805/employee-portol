@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../context/AuthContext";
 import { today } from "../../lib/utils";
@@ -15,12 +15,8 @@ export default function DailyReportForm() {
   const [loading, setLoading]     = useState(true);
   const [saving, setSaving]       = useState(false);
 
-  useEffect(() => {
+  const fetchReport = useCallback(async () => {
     if (!profile) return;
-    fetchReport();
-  }, [profile]);
-
-  const fetchReport = async () => {
     setLoading(true);
     const { data } = await supabase
       .from("daily_reports")
@@ -35,7 +31,11 @@ export default function DailyReportForm() {
       setSecondHalf(data.second_half || "");
     }
     setLoading(false);
-  };
+  }, [profile]);
+
+  useEffect(() => {
+    if (profile) fetchReport();
+  }, [profile, fetchReport]);
 
   const handleSubmit = async () => {
     if (!firstHalf.trim() && !secondHalf.trim()) {
@@ -58,7 +58,6 @@ export default function DailyReportForm() {
         .from("daily_reports")
         .insert({
           user_id:      profile.id,
-          manager_id:   profile.manager_id || null,
           date:         today(),
           first_half:   firstHalf,
           second_half:  secondHalf,

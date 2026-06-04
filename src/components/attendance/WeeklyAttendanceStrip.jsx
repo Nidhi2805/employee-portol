@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../context/AuthContext";
-import { formatTime } from "../../lib/utils";
 import Card from "../ui/Card";
 import { BarChart2 } from "lucide-react";
 

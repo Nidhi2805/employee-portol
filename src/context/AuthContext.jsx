@@ -4,13 +4,15 @@ import { supabase } from "../lib/supabase";
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser]       = useState(null); // Supabase auth user
-  const [profile, setProfile] = useState(null); // Our users table row
-  const [loading, setLoading] = useState(true);
+  const [user, setUser]             = useState(null);
+  const [profile, setProfile]       = useState(null);
+  const [profileError, setProfileError] = useState(null);
+  const [loading, setLoading]     = useState(true);
 
   const fetchProfile = useCallback(async (authUser) => {
     if (!authUser) {
       setProfile(null);
+      setProfileError(null);
       return;
     }
     const { data, error } = await supabase
@@ -19,18 +21,29 @@ export function AuthProvider({ children }) {
       .eq("id", authUser.id)
       .maybeSingle();
 
-    if (!error && data) setProfile(data);
+    if (error) {
+      setProfile(null);
+      setProfileError(error.message);
+      return;
+    }
+    if (!data) {
+      setProfile(null);
+      setProfileError(
+        "No employee profile found for this account. Contact your administrator."
+      );
+      return;
+    }
+    setProfile(data);
+    setProfileError(null);
   }, []);
 
   useEffect(() => {
-    // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       const authUser = session?.user ?? null;
       setUser(authUser);
       fetchProfile(authUser).finally(() => setLoading(false));
     });
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (_event, session) => {
         const authUser = session?.user ?? null;
@@ -54,17 +67,21 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut();
     setUser(null);
     setProfile(null);
+    setProfileError(null);
   };
 
   const refreshProfile = () => fetchProfile(user);
 
   return (
-    <AuthContext.Provider value={{ user, profile, loading, signIn, signOut, refreshProfile }}>
+    <AuthContext.Provider
+      value={{ user, profile, profileError, loading, signIn, signOut, refreshProfile }}
+    >
       {children}
     </AuthContext.Provider>
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used inside AuthProvider");

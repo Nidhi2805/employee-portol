@@ -17,7 +17,7 @@ export default function Login() {
     e.preventDefault();
     setLoading(true);
 
-    const { data, error } = await signIn(email, password);
+    const { error } = await signIn(email, password);
 
     if (error) {
       toast.error(error.message || "Login failed");
@@ -25,9 +25,6 @@ export default function Login() {
       return;
     }
 
-    // Fetch role from users table to route correctly
-    const role = data?.user?.user_metadata?.role;
-    // Role routing happens in App.jsx via profile — just push to /
     navigate("/");
   };
 

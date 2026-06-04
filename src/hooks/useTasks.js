@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 
@@ -7,13 +7,9 @@ export function useTasks() {
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    if (profile) fetchTasks()
-  }, [profile])
-
-  async function fetchTasks() {
+  const fetchTasks = useCallback(async () => {
+    if (!profile) return
     const query = supabase.from('tasks').select('*, assignee:assigned_to(name)')
-    // Employees see only their tasks; managers/admins see all assigned by them
     if (profile.role === 'employee') {
       query.eq('assigned_to', profile.id)
     } else {
@@ -22,7 +18,11 @@ export function useTasks() {
     const { data } = await query.order('created_at', { ascending: false })
     setTasks(data || [])
     setLoading(false)
-  }
+  }, [profile])
+
+  useEffect(() => {
+    if (profile) fetchTasks()
+  }, [profile, fetchTasks])
 
   async function createTask(taskData) {
     const { error } = await supabase.from('tasks').insert({

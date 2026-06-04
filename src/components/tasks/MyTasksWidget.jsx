@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../context/AuthContext";
 import { priorityColor, formatDate } from "../../lib/utils";
@@ -26,12 +26,8 @@ export default function MyTasksWidget() {
   const [tasks, setTasks]   = useState([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchTasks = useCallback(async () => {
     if (!profile) return;
-    fetchTasks();
-  }, [profile]);
-
-  const fetchTasks = async () => {
     setLoading(true);
     const { data } = await supabase
       .from("tasks")
@@ -42,7 +38,11 @@ export default function MyTasksWidget() {
       .limit(5);
     if (data) setTasks(data);
     setLoading(false);
-  };
+  }, [profile]);
+
+  useEffect(() => {
+    if (profile) fetchTasks();
+  }, [profile, fetchTasks]);
 
   const advanceStatus = async (task) => {
     const nextStatus = STATUS_FLOW[task.status];

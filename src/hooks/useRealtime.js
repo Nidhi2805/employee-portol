@@ -21,5 +21,5 @@ export function useRealtime(table, onUpdate, event = "*") {
       .subscribe();
 
     return () => supabase.removeChannel(channel);
-  }, [table, event]);
+  }, [table, event, onUpdate]);
 }

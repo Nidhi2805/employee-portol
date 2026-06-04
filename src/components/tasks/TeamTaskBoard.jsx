@@ -5,7 +5,6 @@ import { priorityColor, formatDate } from "../../lib/utils";
 import Card from "../ui/Card";
 import Badge from "../ui/Badge";
 import Button from "../ui/Button";
-import Avatar from "../ui/Avatar";
 import { CheckSquare, Plus, X, Check } from "lucide-react";
 import toast from "react-hot-toast";
 

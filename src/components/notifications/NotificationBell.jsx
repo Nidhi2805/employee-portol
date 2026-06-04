@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { Bell } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../context/AuthContext";
@@ -12,19 +12,8 @@ export default function NotificationBell() {
 
   const unread = notifications.filter((n) => !n.read).length;
 
-  useEffect(() => {
+  const fetchNotifications = useCallback(async () => {
     if (!profile) return;
-    fetchNotifications();
-
-    // Close dropdown on outside click
-    const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [profile]);
-
-  const fetchNotifications = async () => {
     const { data } = await supabase
       .from("notifications")
       .select("*")
@@ -32,7 +21,18 @@ export default function NotificationBell() {
       .order("created_at", { ascending: false })
       .limit(20);
     if (data) setNotifications(data);
-  };
+  }, [profile]);
+
+  useEffect(() => {
+    if (!profile) return;
+    fetchNotifications();
+
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [profile, fetchNotifications]);
 
   const markAllRead = async () => {
     await supabase

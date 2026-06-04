@@ -162,7 +162,7 @@ export default function LeaveBalanceManager() {
         size="sm"
       >
         <div className="flex flex-col gap-4">
-          {leaveTypes.map(({ key, label, color }) => (
+          {leaveTypes.map(({ key, label }) => (
             <div key={key} className="flex flex-col gap-2">
               <p className="text-sm font-semibold text-gray-700">{label} Leave</p>
               <div className="grid grid-cols-2 gap-3">

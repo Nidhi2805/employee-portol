@@ -120,7 +120,7 @@ export default function EmployeeManagement() {
       }
 
       // Use Supabase admin signUp — triggers our handle_new_user trigger
-      const { data: authData, error: authError } = await supabase.auth.admin
+      const { error: authError } = await supabase.auth.admin
         ? supabase.auth.admin.createUser({
             email:    form.email,
             password: form.password,

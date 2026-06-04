@@ -1,11 +1,30 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabase";
+import { useAuth } from "../../context/AuthContext";
 import { formatDate, formatTime } from "../../lib/utils";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 import { BarChart2, Download, Search } from "lucide-react";
 
+function enrichRecordsWithTeam(records, teamById) {
+  if (!teamById || Object.keys(teamById).length === 0) return records;
+  return records.map((r) => {
+    if (r.users?.name) return r;
+    const member = teamById[r.user_id];
+    if (!member) return r;
+    return {
+      ...r,
+      users: {
+        name: member.name,
+        email: member.email,
+        department: member.department,
+      },
+    };
+  });
+}
+
 export default function AttendanceOverview() {
+  const { profile } = useAuth();
   const [records, setRecords]   = useState([]);
   const [loading, setLoading]   = useState(true);
   const [dateFrom, setDateFrom] = useState(
@@ -17,17 +36,40 @@ export default function AttendanceOverview() {
   const [search, setSearch]     = useState("");
 
   const fetchRecords = useCallback(async () => {
+    if (!profile) return;
     setLoading(true);
-    const { data } = await supabase
+
+    let teamById = null;
+
+    let query = supabase
       .from("attendance")
       .select("*, users(name, email, department)")
       .gte("date", dateFrom)
       .lte("date", dateTo)
       .order("date", { ascending: false })
       .order("clock_in", { ascending: false });
-    setRecords(data || []);
+
+    if (profile.role === "manager") {
+      const { data: teamData } = await supabase
+        .from("users")
+        .select("id, name, email, department")
+        .eq("manager_id", profile.id)
+        .eq("is_active", true);
+
+      if (!teamData || teamData.length === 0) {
+        setRecords([]);
+        setLoading(false);
+        return;
+      }
+
+      teamById = Object.fromEntries(teamData.map((m) => [m.id, m]));
+      query = query.in("user_id", teamData.map((m) => m.id));
+    }
+
+    const { data } = await query;
+    setRecords(enrichRecordsWithTeam(data || [], teamById));
     setLoading(false);
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, profile]);
 
   useEffect(() => { fetchRecords(); }, [fetchRecords]);
 

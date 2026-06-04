@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabase";
-import { formatDate } from "../../lib/utils";
 import Card from "../ui/Card";
 import { ScrollText, Search } from "lucide-react";
 

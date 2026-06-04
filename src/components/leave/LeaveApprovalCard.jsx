@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabase";
+import { fetchTeamMembers } from "../../lib/team";
 import { useAuth } from "../../context/AuthContext";
 import { formatDate } from "../../lib/utils";
 import Card from "../ui/Card";
@@ -9,71 +10,84 @@ import toast from "react-hot-toast";
 
 export default function LeaveApprovalCard() {
   const { profile } = useAuth();
-  const [leaves, setLeaves]   = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [acting, setActing]   = useState(null);
+  const [leaves, setLeaves]       = useState([]);
+  const [loading, setLoading]     = useState(true);
+  const [acting, setActing]       = useState(null);
+  const [teamCount, setTeamCount] = useState(0);
+  const [hint, setHint]           = useState(null);
 
   const fetchLeaves = useCallback(async () => {
-  if (!profile) return;
-  setLoading(true);
+    if (!profile) return;
+    setLoading(true);
+    setHint(null);
 
-  const { data: teamData } = await supabase
-    .from("users")
-    .select("id")
-    .eq("manager_id", profile.id)
-    .eq("is_active", true);
+    const { team, error: teamError } = await fetchTeamMembers(profile.id);
+    setTeamCount(team.length);
 
-  if (!teamData || teamData.length === 0) {
-    setLeaves([]);
-    setLoading(false);
-    return;
-  }
+    if (teamError) {
+      setLeaves([]);
+      setHint(`Could not load team: ${teamError.message}`);
+      setLoading(false);
+      return;
+    }
 
-  const teamIds = teamData.map((u) => u.id);
-  const quotedTeamIds = teamIds.map((id) => `"${id}"`).join(",");
+    if (team.length === 0) {
+      setLeaves([]);
+      setHint(
+        "No employees are assigned to you. In Supabase (or Admin → Employees), set each employee's Reports To / manager_id to your account."
+      );
+      setLoading(false);
+      return;
+    }
 
-  let leaveQuery = supabase
-    .from("leaves")
-    .select("*, users(name, email)")
-    .eq("status", "pending");
+    const teamById = Object.fromEntries(team.map((u) => [u.id, u]));
+    const teamIds = team.map((u) => u.id);
 
-  if (teamIds.length > 0) {
-    leaveQuery = leaveQuery.or(
-      `manager_id.eq.${profile.id},user_id.in.(${quotedTeamIds})`
+    const { data, error } = await supabase
+      .from("leaves")
+      .select("*")
+      .eq("status", "pending")
+      .in("user_id", teamIds)
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      setLeaves([]);
+      setHint(
+        `Could not load leave requests: ${error.message}. If using Row Level Security, run supabase/manager-team-policies.sql in the Supabase SQL editor.`
+      );
+      setLoading(false);
+      return;
+    }
+
+    setLeaves(
+      (data || []).map((leave) => ({
+        ...leave,
+        users: teamById[leave.user_id],
+      }))
     );
-  } else {
-    leaveQuery = leaveQuery.eq("manager_id", profile.id);
-  }
-
-  const { data } = await leaveQuery.order("created_at", { ascending: true });
-
-  setLeaves(data || []);
-  setLoading(false);
-}, [profile]);
+    setLoading(false);
+  }, [profile]);
 
   useEffect(() => { fetchLeaves(); }, [fetchLeaves]);
 
   const handleAction = async (leave, action) => {
     setActing(leave.id);
+    const payload = { status: action };
     const { error } = await supabase
       .from("leaves")
-      .update({
-        status:      action,
-        reviewed_by: profile.id,
-        reviewed_at: new Date().toISOString(),
-      })
+      .update(payload)
       .eq("id", leave.id);
 
     if (error) {
-      toast.error("Action failed");
+      toast.error("Action failed: " + error.message);
     } else {
       toast.success(`Leave ${action}`);
 
-      // Update leave balance if approved
-      if (action === "approved") {
-        const days = Math.ceil(
-          (new Date(leave.end_date) - new Date(leave.start_date)) / 86400000
-        ) + 1;
+      if (action === "approved" && leave.leave_type) {
+        const days =
+          Math.ceil(
+            (new Date(leave.end_date) - new Date(leave.start_date)) / 86400000
+          ) + 1;
         const field = `${leave.leave_type}_used`;
         const { data: bal } = await supabase
           .from("leave_balances")
@@ -88,7 +102,6 @@ export default function LeaveApprovalCard() {
         }
       }
 
-      // Notify employee
       await supabase.from("notifications").insert({
         user_id: leave.user_id,
         type:    "leave_update",
@@ -114,13 +127,21 @@ export default function LeaveApprovalCard() {
         )}
       </div>
 
+      {teamCount > 0 && (
+        <p className="text-xs text-gray-400">{teamCount} team member{teamCount !== 1 ? "s" : ""}</p>
+      )}
+
       {loading ? (
         <div className="flex justify-center py-6">
           <div className="animate-spin h-5 w-5 border-2 border-primary-600 border-t-transparent rounded-full" />
         </div>
+      ) : hint ? (
+        <p className="text-center text-amber-700 text-sm py-4 px-2 bg-amber-50 rounded-lg">
+          {hint}
+        </p>
       ) : leaves.length === 0 ? (
         <p className="text-center text-gray-400 text-sm py-4">
-          No pending leave requests 🎉
+          No pending leave requests. Ask an employee to apply from My Leave.
         </p>
       ) : (
         <div className="flex flex-col gap-2 max-h-80 overflow-y-auto pr-1">
@@ -132,12 +153,16 @@ export default function LeaveApprovalCard() {
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="font-medium text-gray-800 text-sm">
-                    {leave.users?.name}
+                    {leave.users?.name || "Employee"}
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {formatDate(leave.start_date)} → {formatDate(leave.end_date)}
-                    &nbsp;·&nbsp;
-                    <span className="capitalize">{leave.leave_type}</span>
+                    {leave.leave_type && (
+                      <>
+                        &nbsp;·&nbsp;
+                        <span className="capitalize">{leave.leave_type}</span>
+                      </>
+                    )}
                   </p>
                 </div>
                 <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-medium flex-shrink-0">

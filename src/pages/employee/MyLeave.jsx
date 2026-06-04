@@ -46,7 +46,6 @@ export default function MyLeave() {
     const { error } = await supabase.from("leaves").insert({
       ...form,
       user_id: profile.id,
-      manager_id: profile.manager_id || null,
       status: "pending",
     });
     if (error) toast.error("Failed to apply: " + error.message);

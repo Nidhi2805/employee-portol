@@ -1,10 +1,6 @@
 import { useState } from "react";
 import PageWrapper from "../../components/layout/PageWrapper";
 import AdminStatsBar from "../../components/admin/AdminStatsBar";
-import EmployeeManagement from "../../components/admin/EmployeeManagement";
-import AttendanceOverview from "../../components/admin/AttendanceOverview";
-import AnnouncementPanel from "../../components/admin/AnnouncementPanel";
-import AuditLogViewer from "../../components/admin/AuditLogViewer";
 import EmployeeManagementPage from "./EmployeeManagement";
 import AdminAttendance from "./AdminAttendance";
 import AdminAnnouncements from "./AdminAnnouncements";
@@ -31,7 +27,6 @@ export default function AdminDashboard() {
 
   return (
     <PageWrapper title="Admin Dashboard">
-      {/* Greeting */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">
           {greeting}, {profile?.name?.split(" ")[0]} 👋
@@ -44,12 +39,10 @@ export default function AdminDashboard() {
         </p>
       </div>
 
-      {/* Stats */}
       <div className="mb-6">
         <AdminStatsBar />
       </div>
 
-      {/* Tab bar */}
       <div className="flex gap-1 bg-gray-100 p-1 rounded-xl mb-6 overflow-x-auto">
         {TABS.map(({ key, label, icon: Icon }) => (
           <button
@@ -66,7 +59,6 @@ export default function AdminDashboard() {
         ))}
       </div>
 
-      {/* Tab content */}
       {tab === "employees"  && <EmployeeManagementPage />}
       {tab === "attendance" && <AdminAttendance />}
       {tab === "announce"   && <AdminAnnouncements />}

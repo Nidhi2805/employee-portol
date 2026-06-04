@@ -6,8 +6,8 @@ import { roleBadgeColor } from "../../lib/utils";
 import toast from "react-hot-toast";
 import {
   LayoutDashboard, ClipboardList, CalendarDays,
-  CheckSquare, Bell, Users, FileText,
-  LogOut, Briefcase, ShieldCheck, BarChart2,
+  CheckSquare, Users, FileText,
+  LogOut, Briefcase, BarChart2,
   Megaphone, ScrollText, X, KeyRound,
 } from "lucide-react";
 

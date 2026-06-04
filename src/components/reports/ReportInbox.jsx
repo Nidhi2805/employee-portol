@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabase";
+import { fetchTeamMembers } from "../../lib/team";
 import { useAuth } from "../../context/AuthContext";
-import { formatDate, today } from "../../lib/utils";
+import { today } from "../../lib/utils";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 import { FileText, ChevronDown, ChevronUp, Send } from "lucide-react";
@@ -20,11 +21,13 @@ export default function ReportInbox() {
   setLoading(true);
 
   // Single query joining users — no two-step fetch
-  const { data: teamData } = await supabase
-    .from("users")
-    .select("id, name")
-    .eq("manager_id", profile.id)
-    .eq("is_active", true);
+  const { team: teamData, error: teamError } = await fetchTeamMembers(profile.id);
+
+  if (teamError) {
+    setReports([]);
+    setLoading(false);
+    return;
+  }
 
   if (!teamData || teamData.length === 0) {
     setReports([]);
@@ -33,25 +36,17 @@ export default function ReportInbox() {
   }
 
   const teamIds = teamData.map((u) => u.id);
-  const quotedTeamIds = teamIds.map((id) => `"${id}"`).join(",");
 
-  let reportQuery = supabase
+  const { data: reportData } = await supabase
     .from("daily_reports")
-    .select("*, users(name)")
-    .eq("date", today());
-
-  if (teamIds.length > 0) {
-    reportQuery = reportQuery.or(
-      `manager_id.eq.${profile.id},user_id.in.(${quotedTeamIds})`
-    );
-  } else {
-    reportQuery = reportQuery.eq("manager_id", profile.id);
-  }
-
-  const { data: reportData } = await reportQuery;
+    .select("*")
+    .eq("date", today())
+    .in("user_id", teamIds);
 
   // Mark team members who haven't submitted
   const submittedIds = (reportData || []).map((r) => r.user_id);
+  const teamById = Object.fromEntries(teamData.map((u) => [u.id, u]));
+
   const notSubmitted = teamData
     .filter((u) => !submittedIds.includes(u.id))
     .map((u) => ({
@@ -60,7 +55,13 @@ export default function ReportInbox() {
       not_submitted: true,
     }));
 
-  setReports([...(reportData || []), ...notSubmitted]);
+  setReports([
+    ...(reportData || []).map((r) => ({
+      ...r,
+      users: teamById[r.user_id],
+    })),
+    ...notSubmitted,
+  ]);
   setLoading(false);
 }, [profile]);
 
