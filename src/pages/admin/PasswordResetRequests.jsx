@@ -17,11 +17,21 @@ export default function PasswordResetRequests() {
 
   const fetchRequests = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
-      .from("password_reset_requests")
-      .select("*, users(name, email)")
-      .order("created_at", { ascending: false });
-    setRequests(data || []);
+    const [{ data: requestData }, { data: users }] = await Promise.all([
+      supabase
+        .from("password_reset_requests")
+        .select("*")
+        .order("created_at", { ascending: false }),
+      supabase.from("users").select("id, name, email"),
+    ]);
+
+    const usersById = Object.fromEntries((users || []).map((u) => [u.id, u]));
+    setRequests(
+      (requestData || []).map((r) => ({
+        ...r,
+        users: usersById[r.user_id] || r.users,
+      }))
+    );
     setLoading(false);
   }, []);
 
@@ -29,8 +39,15 @@ export default function PasswordResetRequests() {
 
   const handleResolve = async (req) => {
     setActing(req.id);
+    const email = req.users?.email;
+    if (!email) {
+      toast.error("Could not find user email");
+      setActing(null);
+      return;
+    }
+
     const { error } = await supabase.auth.resetPasswordForEmail(
-      req.users.email,
+      email,
       { redirectTo: window.location.origin + "/login" }
     );
     if (error) {
@@ -47,7 +64,7 @@ export default function PasswordResetRequests() {
         target_id:   req.user_id,
         metadata:    { email: req.users.email },
       });
-      toast.success(`Reset email sent to ${req.users.email}`);
+      toast.success(`Reset email sent to ${email}`);
       fetchRequests();
     }
     setActing(null);

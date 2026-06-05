@@ -62,3 +62,17 @@ export function computeHours(start, end) {
   const diff = new Date(end) - new Date(start);
   return Math.round((diff / 3600000) * 100) / 100;
 }
+
+// Supabase may return leave_balances as an array or a single object
+export function getLeaveBalance(record) {
+  const bal = record?.leave_balances;
+  if (!bal) return null;
+  if (Array.isArray(bal)) return bal[0] ?? null;
+  return bal;
+}
+
+export function leaveDaysBetween(startDate, endDate) {
+  return (
+    Math.ceil((new Date(endDate) - new Date(startDate)) / 86400000) + 1
+  );
+}

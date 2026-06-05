@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabase";
-import { fetchTeamMembers } from "../../lib/team";
 import { useAuth } from "../../context/AuthContext";
-import { formatDate } from "../../lib/utils";
+import { formatDate, leaveDaysBetween } from "../../lib/utils";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 import { CalendarDays, Check, X } from "lucide-react";
@@ -10,98 +9,96 @@ import toast from "react-hot-toast";
 
 export default function LeaveApprovalCard() {
   const { profile } = useAuth();
-  const [leaves, setLeaves]       = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [acting, setActing]       = useState(null);
-  const [teamCount, setTeamCount] = useState(0);
-  const [hint, setHint]           = useState(null);
+  const [leaves, setLeaves]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [acting, setActing]   = useState(null);
 
   const fetchLeaves = useCallback(async () => {
-    if (!profile) return;
-    setLoading(true);
-    setHint(null);
+  if (!profile) return;
+  setLoading(true);
 
-    const { team, error: teamError } = await fetchTeamMembers(profile.id);
-    setTeamCount(team.length);
+  const { data: teamData } = await supabase
+    .from("users")
+    .select("id")
+    .eq("manager_id", profile.id)
+    .eq("is_active", true);
 
-    if (teamError) {
-      setLeaves([]);
-      setHint(`Could not load team: ${teamError.message}`);
-      setLoading(false);
-      return;
-    }
-
-    if (team.length === 0) {
-      setLeaves([]);
-      setHint(
-        "No employees are assigned to you. In Supabase (or Admin → Employees), set each employee's Reports To / manager_id to your account."
-      );
-      setLoading(false);
-      return;
-    }
-
-    const teamById = Object.fromEntries(team.map((u) => [u.id, u]));
-    const teamIds = team.map((u) => u.id);
-
-    const { data, error } = await supabase
-      .from("leaves")
-      .select("*")
-      .eq("status", "pending")
-      .in("user_id", teamIds)
-      .order("created_at", { ascending: true });
-
-    if (error) {
-      setLeaves([]);
-      setHint(
-        `Could not load leave requests: ${error.message}. If using Row Level Security, run supabase/manager-team-policies.sql in the Supabase SQL editor.`
-      );
-      setLoading(false);
-      return;
-    }
-
-    setLeaves(
-      (data || []).map((leave) => ({
-        ...leave,
-        users: teamById[leave.user_id],
-      }))
-    );
+  if (!teamData || teamData.length === 0) {
+    setLeaves([]);
     setLoading(false);
-  }, [profile]);
+    return;
+  }
+
+  const teamIds = teamData.map((u) => u.id);
+  const quotedTeamIds = teamIds.map((id) => `"${id}"`).join(",");
+
+  let leaveQuery = supabase
+    .from("leaves")
+    .select("*, users(name, email)")
+    .eq("status", "pending");
+
+  if (teamIds.length > 0) {
+    leaveQuery = leaveQuery.or(
+      `manager_id.eq.${profile.id},user_id.in.(${quotedTeamIds})`
+    );
+  } else {
+    leaveQuery = leaveQuery.eq("manager_id", profile.id);
+  }
+
+  const { data } = await leaveQuery.order("created_at", { ascending: true });
+
+  setLeaves(data || []);
+  setLoading(false);
+}, [profile]);
 
   useEffect(() => { fetchLeaves(); }, [fetchLeaves]);
 
   const handleAction = async (leave, action) => {
     setActing(leave.id);
-    const payload = { status: action };
     const { error } = await supabase
       .from("leaves")
-      .update(payload)
+      .update({
+        status:      action,
+        reviewed_by: profile.id,
+        reviewed_at: new Date().toISOString(),
+      })
       .eq("id", leave.id);
 
     if (error) {
-      toast.error("Action failed: " + error.message);
+      toast.error("Action failed");
     } else {
       toast.success(`Leave ${action}`);
 
-      if (action === "approved" && leave.leave_type) {
-        const days =
-          Math.ceil(
-            (new Date(leave.end_date) - new Date(leave.start_date)) / 86400000
-          ) + 1;
+      if (action === "approved" && leave.leave_type !== "unpaid") {
+        const days = leaveDaysBetween(leave.start_date, leave.end_date);
         const field = `${leave.leave_type}_used`;
         const { data: bal } = await supabase
           .from("leave_balances")
           .select("*")
           .eq("user_id", leave.user_id)
           .maybeSingle();
-        if (bal) {
-          await supabase
-            .from("leave_balances")
-            .update({ [field]: (bal[field] || 0) + days })
-            .eq("user_id", leave.user_id);
-        }
+
+        const currentUsed = bal?.[field] ?? 0;
+        const { error: balError } = await supabase
+          .from("leave_balances")
+          .upsert(
+            {
+              user_id: leave.user_id,
+              casual_total: bal?.casual_total ?? 12,
+              casual_used:  bal?.casual_used  ?? 0,
+              sick_total:   bal?.sick_total   ?? 8,
+              sick_used:    bal?.sick_used    ?? 0,
+              earned_total: bal?.earned_total ?? 15,
+              earned_used:  bal?.earned_used  ?? 0,
+              [field]: currentUsed + days,
+            },
+            { onConflict: "user_id" }
+          );
+
+        if (balError) toast.error("Leave approved but balance update failed");
       }
 
+      // Notify employee
       await supabase.from("notifications").insert({
         user_id: leave.user_id,
         type:    "leave_update",
@@ -127,21 +124,13 @@ export default function LeaveApprovalCard() {
         )}
       </div>
 
-      {teamCount > 0 && (
-        <p className="text-xs text-gray-400">{teamCount} team member{teamCount !== 1 ? "s" : ""}</p>
-      )}
-
       {loading ? (
         <div className="flex justify-center py-6">
           <div className="animate-spin h-5 w-5 border-2 border-primary-600 border-t-transparent rounded-full" />
         </div>
-      ) : hint ? (
-        <p className="text-center text-amber-700 text-sm py-4 px-2 bg-amber-50 rounded-lg">
-          {hint}
-        </p>
       ) : leaves.length === 0 ? (
         <p className="text-center text-gray-400 text-sm py-4">
-          No pending leave requests. Ask an employee to apply from My Leave.
+          No pending leave requests 🎉
         </p>
       ) : (
         <div className="flex flex-col gap-2 max-h-80 overflow-y-auto pr-1">
@@ -153,16 +142,12 @@ export default function LeaveApprovalCard() {
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <p className="font-medium text-gray-800 text-sm">
-                    {leave.users?.name || "Employee"}
+                    {leave.users?.name}
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
                     {formatDate(leave.start_date)} → {formatDate(leave.end_date)}
-                    {leave.leave_type && (
-                      <>
-                        &nbsp;·&nbsp;
-                        <span className="capitalize">{leave.leave_type}</span>
-                      </>
-                    )}
+                    &nbsp;·&nbsp;
+                    <span className="capitalize">{leave.leave_type}</span>
                   </p>
                 </div>
                 <span className="text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full font-medium flex-shrink-0">

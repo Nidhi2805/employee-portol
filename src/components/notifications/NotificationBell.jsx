@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Bell } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../context/AuthContext";
+import { useRealtime } from "../../hooks/useRealtime";
 import { formatDate } from "../../lib/utils";
 
 export default function NotificationBell() {
@@ -33,6 +34,18 @@ export default function NotificationBell() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [profile, fetchNotifications]);
+
+  useRealtime("notifications", (payload) => {
+    const row = payload.new;
+    if (!row || row.user_id !== profile?.id) return;
+    if (payload.eventType === "INSERT") {
+      setNotifications((prev) => [row, ...prev].slice(0, 20));
+    } else if (payload.eventType === "UPDATE") {
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === row.id ? row : n))
+      );
+    }
+  });
 
   const markAllRead = async () => {
     await supabase

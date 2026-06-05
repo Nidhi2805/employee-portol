@@ -110,65 +110,77 @@ export default function EmployeeManagement() {
         fetchData();
       }
     } else {
-      // Create new Supabase auth user via admin API
-      // We do this by inserting via the auth admin endpoint
-      // Since we're frontend-only, we use signUp and immediately set role
       if (!form.password || form.password.length < 6) {
         toast.error("Password must be at least 6 characters");
         setSaving(false);
         return;
       }
 
-      // Use Supabase admin signUp — triggers our handle_new_user trigger
-      const { error: authError } = await supabase.auth.admin
-        ? supabase.auth.admin.createUser({
-            email:    form.email,
-            password: form.password,
-            user_metadata: { name: form.name, role: form.role },
-          })
-        : { data: null, error: { message: "Admin API not available on client" } };
+      const { data: { session: adminSession } } = await supabase.auth.getSession();
 
-      // Fallback: use regular signUp (works if email confirmation is OFF in Supabase)
-      if (authError) {
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          email:    form.email,
-          password: form.password,
-          options: { data: { name: form.name, role: form.role } },
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email:    form.email.trim(),
+        password: form.password,
+        options: {
+          data: { name: form.name, role: form.role },
+          emailRedirectTo: window.location.origin,
+        },
+      });
+
+      if (adminSession) {
+        await supabase.auth.setSession({
+          access_token:  adminSession.access_token,
+          refresh_token: adminSession.refresh_token,
         });
-        if (signUpError) {
-          toast.error("Failed to create user: " + signUpError.message);
-          setSaving(false);
-          return;
-        }
-
-        // Update the users row created by trigger
-        if (signUpData?.user) {
-          await supabase
-            .from("users")
-            .update({
-              role:       form.role,
-              department: form.department,
-              position:   form.position,
-              phone:      form.phone,
-              manager_id: form.manager_id || null,
-            })
-            .eq("id", signUpData.user.id);
-
-          // Create default leave balance
-          await supabase.from("leave_balances").insert({
-            user_id: signUpData.user.id,
-          });
-        }
       }
+
+      if (signUpError) {
+        toast.error("Failed to create user: " + signUpError.message);
+        setSaving(false);
+        return;
+      }
+
+      const userId = signUpData?.user?.id;
+      if (!userId) {
+        toast.error("Could not create user. Check if email confirmation is required in Supabase.");
+        setSaving(false);
+        return;
+      }
+
+      const { error: profileError } = await supabase.from("users").upsert({
+        id:         userId,
+        name:       form.name.trim(),
+        email:      form.email.trim(),
+        role:       form.role,
+        department: form.department || null,
+        position:   form.position || null,
+        phone:      form.phone || null,
+        manager_id: form.manager_id || null,
+        is_active:  true,
+      }, { onConflict: "id" });
+
+      if (profileError) {
+        toast.error("Profile save failed: " + profileError.message);
+        setSaving(false);
+        return;
+      }
+
+      await supabase.from("leave_balances").upsert({
+        user_id:      userId,
+        casual_total: 12, casual_used: 0,
+        sick_total:   8,  sick_used: 0,
+        earned_total: 15, earned_used: 0,
+      }, { onConflict: "user_id" });
 
       await supabase.from("audit_logs").insert({
         actor_id:    profile.id,
         action:      "create_employee",
         target_type: "user",
-        metadata:    { email: form.email, role: form.role },
+        target_id:   userId,
+        metadata:    { email: form.email, role: form.role, name: form.name },
       });
 
-      toast.success("Employee created! They can now log in.");
+      toast.success("Employee created successfully!");
       setShowForm(false);
       fetchData();
     }

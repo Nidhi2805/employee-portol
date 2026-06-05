@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { supabase } from "../../lib/supabase";
 import { useAuth } from "../../context/AuthContext";
+import { notifyAnnouncementAudience } from "../../lib/notify";
 import { formatDate } from "../../lib/utils";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
@@ -43,7 +44,8 @@ export default function AnnouncementPanel() {
     });
     if (error) toast.error("Failed to create announcement");
     else {
-      toast.success("Announcement posted!");
+      await notifyAnnouncementAudience(form.audience, form.title, form.body);
+      toast.success("Announcement posted and notifications sent!");
       setForm({ title: "", body: "", audience: "all", expires_at: "" });
       setShowForm(false);
       fetchAnnouncements();

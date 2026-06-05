@@ -4,10 +4,11 @@ import Avatar from "../ui/Avatar";
 import Badge from "../ui/Badge";
 import { roleBadgeColor } from "../../lib/utils";
 import toast from "react-hot-toast";
+import { submitPasswordResetRequest } from "../../lib/notify";
 import {
   LayoutDashboard, ClipboardList, CalendarDays,
-  CheckSquare, Users, FileText,
-  LogOut, Briefcase, BarChart2,
+  CheckSquare, Bell, Users, FileText,
+  LogOut, Briefcase, ShieldCheck, BarChart2,
   Megaphone, ScrollText, X, KeyRound,
 } from "lucide-react";
 
@@ -47,6 +48,20 @@ export default function Sidebar({ open, onClose }) {
     await signOut();
     toast.success("Signed out");
     navigate("/login");
+  };
+
+  const handlePasswordResetRequest = async () => {
+    if (!profile?.email) return;
+    const result = await submitPasswordResetRequest(profile.email);
+    if (result.error) {
+      toast.error(result.error);
+      return;
+    }
+    if (result.alreadyPending) {
+      toast.success("Your password reset request is already pending.");
+    } else {
+      toast.success("Password reset request sent to admin.");
+    }
   };
 
   return (
@@ -118,7 +133,16 @@ export default function Sidebar({ open, onClose }) {
         </nav>
 
         {/* Sign out */}
-        <div className="px-3 py-4 border-t border-primary-700">
+        <div className="px-3 py-4 border-t border-primary-700 space-y-0.5">
+          {(roleKey === "employee" || roleKey === "manager") && (
+            <button
+              onClick={handlePasswordResetRequest}
+              className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition"
+            >
+              <KeyRound size={18} />
+              Request Password Reset
+            </button>
+          )}
           <button
             onClick={handleSignOut}
             className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white transition"

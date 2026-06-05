@@ -64,6 +64,12 @@ export default function AttendanceOverview() {
 
       teamById = Object.fromEntries(teamData.map((m) => [m.id, m]));
       query = query.in("user_id", teamData.map((m) => m.id));
+    } else if (profile.role === "admin") {
+      const { data: allUsers } = await supabase
+        .from("users")
+        .select("id, name, email, department");
+
+      teamById = Object.fromEntries((allUsers || []).map((m) => [m.id, m]));
     }
 
     const { data } = await query;

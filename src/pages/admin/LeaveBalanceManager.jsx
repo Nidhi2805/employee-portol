@@ -5,6 +5,7 @@ import Button from "../../components/ui/Button";
 import Modal from "../../components/ui/Modal";
 import Avatar from "../../components/ui/Avatar";
 import { supabase } from "../../lib/supabase";
+import { getLeaveBalance } from "../../lib/utils";
 import { CalendarDays, Pencil, Check, X } from "lucide-react";
 import toast from "react-hot-toast";
 
@@ -35,7 +36,7 @@ export default function LeaveBalanceManager() {
 
   const openEdit = (emp) => {
     setEditTarget(emp);
-    const bal = emp.leave_balances?.[0];
+    const bal = getLeaveBalance(emp);
     setForm({
       casual_total: bal?.casual_total ?? 12,
       casual_used:  bal?.casual_used  ?? 0,
@@ -48,21 +49,28 @@ export default function LeaveBalanceManager() {
 
   const handleSave = async () => {
     setSaving(true);
-    const bal = editTarget.leave_balances?.[0];
+    const payload = { ...form, user_id: editTarget.id };
+    const existing = getLeaveBalance(editTarget);
 
-    if (bal) {
-      const { error } = await supabase
+    let error;
+    ({ error } = await supabase
+      .from("leave_balances")
+      .upsert(payload, { onConflict: "user_id" }));
+
+    if (error && existing?.id) {
+      ({ error } = await supabase
         .from("leave_balances")
-        .update({ ...form, updated_at: new Date().toISOString() })
-        .eq("user_id", editTarget.id);
-      if (error) toast.error("Update failed");
-      else { toast.success("Balance updated"); setEditTarget(null); fetchData(); }
-    } else {
-      const { error } = await supabase
-        .from("leave_balances")
-        .insert({ ...form, user_id: editTarget.id });
-      if (error) toast.error("Create failed");
-      else { toast.success("Balance created"); setEditTarget(null); fetchData(); }
+        .update(form)
+        .eq("id", existing.id));
+    } else if (error) {
+      ({ error } = await supabase.from("leave_balances").insert(payload));
+    }
+
+    if (error) toast.error("Save failed: " + error.message);
+    else {
+      toast.success("Balance saved");
+      setEditTarget(null);
+      fetchData();
     }
     setSaving(false);
   };
@@ -99,7 +107,7 @@ export default function LeaveBalanceManager() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {employees.map((emp) => {
-                  const bal = emp.leave_balances?.[0];
+                  const bal = getLeaveBalance(emp);
                   return (
                     <tr key={emp.id} className="hover:bg-gray-50 transition">
                       <td className="px-4 py-3">
@@ -162,7 +170,7 @@ export default function LeaveBalanceManager() {
         size="sm"
       >
         <div className="flex flex-col gap-4">
-          {leaveTypes.map(({ key, label }) => (
+          {leaveTypes.map(({ key, label, color }) => (
             <div key={key} className="flex flex-col gap-2">
               <p className="text-sm font-semibold text-gray-700">{label} Leave</p>
               <div className="grid grid-cols-2 gap-3">
