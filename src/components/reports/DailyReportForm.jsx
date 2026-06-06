@@ -38,6 +38,10 @@ export default function DailyReportForm() {
   }, [profile, fetchReport]);
 
   const handleSubmit = async () => {
+    if (!profile.id) {
+      toast.error("Profile not loaded. Please refresh and try again.");
+      return;
+    }
     if (!firstHalf.trim() && !secondHalf.trim()) {
       toast.error("Please fill in at least one section");
       return;
@@ -50,7 +54,7 @@ export default function DailyReportForm() {
         .from("daily_reports")
         .update({ first_half: firstHalf, second_half: secondHalf })
         .eq("id", report.id);
-      if (error) toast.error("Failed to update report");
+      if (error) toast.error("Failed to update report : " + error.message);
       else { toast.success("Report updated!"); fetchReport(); }
     } else {
       // Insert new
@@ -61,9 +65,9 @@ export default function DailyReportForm() {
           date:         today(),
           first_half:   firstHalf,
           second_half:  secondHalf,
-          status:       "pending",
+          status:       "submitted",
         });
-      if (error) toast.error("Failed to submit report");
+      if (error) toast.error("Failed to submit report : " + error.message);
       else { toast.success("Report submitted! ✅"); fetchReport(); }
     }
     setSaving(false);

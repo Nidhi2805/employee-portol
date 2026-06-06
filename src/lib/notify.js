@@ -1,4 +1,4 @@
-import { supabase } from './supabase'
+﻿import { supabase } from './supabase'
 
 export async function sendNotification(userId, type, message) {
   await supabase.from('notifications').insert({
@@ -22,71 +22,54 @@ export async function notifyTeam(managerId, type, message) {
   )
 }
 
-export async function notifyAdmins(type, message) {
-  const { data: admins } = await supabase
+export async function submitPasswordResetRequest(email) {
+  const trimmedEmail = email?.trim();
+  if (!trimmedEmail) return { error: "Email is required" };
+
+  const { data: existing, error: checkError } = await supabase
+    .from('password_reset_requests')
+    .select('id')
+    .eq('email', trimmedEmail)
+    .eq('status', 'pending')
+    .maybeSingle();
+
+  if (checkError) return { error: checkError.message || "Failed to check request" };
+  if (existing) return { alreadyPending: true };
+
+  const { data: user, error: userError } = await supabase
     .from('users')
     .select('id')
-    .eq('role', 'admin')
-    .eq('is_active', true)
+    .eq('email', trimmedEmail)
+    .maybeSingle();
 
-  if (!admins?.length) return
-  await supabase.from('notifications').insert(
-    admins.map((a) => ({ user_id: a.id, type, message, read: false }))
-  )
+  if (userError) return { error: userError.message || "Failed to lookup user" };
+
+  const { error: insertError } = await supabase.from('password_reset_requests').insert({
+    email: trimmedEmail,
+    user_id: user?.id || null,
+    status: 'pending',
+    created_at: new Date().toISOString(),
+  });
+
+  if (insertError) return { error: insertError.message || "Failed to submit reset request" };
+  return { success: true };
 }
 
 export async function notifyAnnouncementAudience(audience, title, body) {
-  let query = supabase.from('users').select('id').eq('is_active', true)
+  let query = supabase.from('users').select('id').neq('is_active', false);
 
-  if (audience === 'managers') {
-    query = query.in('role', ['manager', 'admin'])
-  } else if (audience === 'employees') {
-    query = query.eq('role', 'employee')
-  }
+  if (audience === 'managers') query = query.eq('role', 'manager');
+  else if (audience === 'employees') query = query.eq('role', 'employee');
 
-  const { data: users } = await query
-  if (!users?.length) return
+  const { data: users, error } = await query;
+  if (error || !users?.length) return;
 
-  const message = `📢 ${title}: ${body}`
   await supabase.from('notifications').insert(
-    users.map((u) => ({
-      user_id: u.id,
+    users.map((user) => ({
+      user_id: user.id,
       type: 'announcement',
-      message,
+      message: `${title}: ${body}`,
       read: false,
     }))
-  )
-}
-
-export async function submitPasswordResetRequest(email) {
-  const trimmed = email.trim()
-  const { data: user } = await supabase
-    .from('users')
-    .select('id, name, email')
-    .eq('email', trimmed)
-    .maybeSingle()
-
-  if (!user) return { error: 'No account found with this email.' }
-
-  const { data: existing } = await supabase
-    .from('password_reset_requests')
-    .select('id')
-    .eq('user_id', user.id)
-    .eq('status', 'pending')
-    .maybeSingle()
-
-  if (existing) return { error: null, alreadyPending: true, user }
-
-  const { error } = await supabase
-    .from('password_reset_requests')
-    .insert({ user_id: user.id, status: 'pending' })
-
-  if (error) return { error: error.message }
-
-  await notifyAdmins(
-    'password_reset',
-    `${user.name} (${user.email}) requested a password reset.`
-  )
-
-  return { error: null, user }
+  );
 }
