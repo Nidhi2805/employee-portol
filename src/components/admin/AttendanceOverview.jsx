@@ -4,76 +4,83 @@ import { useAuth } from "../../context/AuthContext";
 import { formatDate, formatTime } from "../../lib/utils";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
-import { BarChart2, Download, Search } from "lucide-react";
+import { AlertCircle, BarChart2, Download, Search } from "lucide-react";
 
-function enrichRecordsWithTeam(records, teamById) {
-  if (!teamById || Object.keys(teamById).length === 0) return records;
-  return records.map((r) => {
-    if (r.users?.name) return r;
-    const member = teamById[r.user_id];
-    if (!member) return r;
-    return {
-      ...r,
-      users: {
-        name: member.name,
-        email: member.email,
-        department: member.department,
-      },
-    };
-  });
+function localDateOffset(days = 0) {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 export default function AttendanceOverview() {
   const { profile } = useAuth();
   const [records, setRecords]   = useState([]);
   const [loading, setLoading]   = useState(true);
-  const [dateFrom, setDateFrom] = useState(
-    new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0]
-  );
-  const [dateTo, setDateTo]     = useState(
-    new Date().toISOString().split("T")[0]
-  );
+  const [error, setError]       = useState("");
+  const [dateFrom, setDateFrom] = useState(() => localDateOffset(-7));
+  const [dateTo, setDateTo]     = useState(() => localDateOffset());
   const [search, setSearch]     = useState("");
 
   const fetchRecords = useCallback(async () => {
     if (!profile) return;
     setLoading(true);
-
-    let teamById = null;
+    setError("");
 
     let query = supabase
       .from("attendance")
-      .select("*, users(name, email, department)")
+      .select("*")
       .gte("date", dateFrom)
       .lte("date", dateTo)
       .order("date", { ascending: false })
       .order("clock_in", { ascending: false });
 
+    let userQuery = supabase
+      .from("users")
+      .select("id, name, email, department");
+
     if (profile.role === "manager") {
-      const { data: teamData } = await supabase
-        .from("users")
-        .select("id, name, email, department")
+      userQuery = userQuery
         .eq("manager_id", profile.id)
         .eq("is_active", true);
+    }
 
-      if (!teamData || teamData.length === 0) {
+    const { data: users, error: usersError } = await userQuery;
+    if (usersError) {
+      setRecords([]);
+      setError(`Could not load employees: ${usersError.message}`);
+      setLoading(false);
+      return;
+    }
+
+    const userIds = (users || []).map((user) => user.id);
+    const usersById = Object.fromEntries((users || []).map((user) => [user.id, user]));
+
+    if (profile.role === "manager") {
+      if (userIds.length === 0) {
         setRecords([]);
         setLoading(false);
         return;
       }
-
-      teamById = Object.fromEntries(teamData.map((m) => [m.id, m]));
-      query = query.in("user_id", teamData.map((m) => m.id));
-    } else if (profile.role === "admin") {
-      const { data: allUsers } = await supabase
-        .from("users")
-        .select("id, name, email, department");
-
-      teamById = Object.fromEntries((allUsers || []).map((m) => [m.id, m]));
+      query = query.in("user_id", userIds);
     }
 
-    const { data } = await query;
-    setRecords(enrichRecordsWithTeam(data || [], teamById));
+    const { data, error: attendanceError } = await query;
+    if (attendanceError) {
+      setRecords([]);
+      setError(
+        `Could not load attendance: ${attendanceError.message}. Apply the Supabase portal workflow migration if Row Level Security is enabled.`
+      );
+      setLoading(false);
+      return;
+    }
+
+    setRecords((data || []).map((record) => ({
+      ...record,
+      users: usersById[record.user_id] || null,
+    })));
     setLoading(false);
   }, [dateFrom, dateTo, profile]);
 

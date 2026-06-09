@@ -72,45 +72,32 @@ export default function LeaveApprovalCard() {
 
   const handleAction = async (leave, action) => {
     setActing(leave.id);
-    const payload = { status: action };
-    const { error } = await supabase
+    const { data: updatedLeave, error } = await supabase
       .from("leaves")
-      .update(payload)
-      .eq("id", leave.id);
+      .update({ status: action })
+      .eq("id", leave.id)
+      .eq("status", "pending")
+      .select("id")
+      .maybeSingle();
 
     if (error) {
       toast.error("Action failed: " + error.message);
+    } else if (!updatedLeave) {
+      toast.error("This request was already processed or you do not have permission.");
     } else {
       toast.success(`Leave ${action}`);
 
-      if (action === "approved" && leave.leave_type) {
-        const days =
-          Math.ceil(
-            (new Date(leave.end_date) - new Date(leave.start_date)) / 86400000
-          ) + 1;
-        const field = `${leave.leave_type}_used`;
-        const { data: bal } = await supabase
-          .from("leave_balances")
-          .select("*")
-          .eq("user_id", leave.user_id)
-          .maybeSingle();
-        if (bal) {
-          await supabase
-            .from("leave_balances")
-            .update({ [field]: (bal[field] || 0) + days })
-            .eq("user_id", leave.user_id);
-        }
-      }
-
-      await supabase.from("notifications").insert({
+      const { error: notificationError } = await supabase.from("notifications").insert({
         user_id: leave.user_id,
         type:    "leave_update",
         message: `Your leave request (${formatDate(leave.start_date)} – ${formatDate(leave.end_date)}) was ${action}.`,
       });
+      if (notificationError) {
+        toast.error("Leave updated, but the employee notification could not be sent.");
+      }
 
       fetchLeaves();
     }
-    setActing(null);
   };
 
   return (

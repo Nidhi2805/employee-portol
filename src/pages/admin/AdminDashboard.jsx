@@ -1,10 +1,10 @@
 import { useState } from "react";
 import PageWrapper from "../../components/layout/PageWrapper";
 import AdminStatsBar from "../../components/admin/AdminStatsBar";
-import EmployeeManagementPage from "./EmployeeManagement";
-import AdminAttendance from "./AdminAttendance";
-import AdminAnnouncements from "./AdminAnnouncements";
-import AuditLogPage from "./AuditLog";
+import EmployeeManagement from "../../components/admin/EmployeeManagement";
+import AttendanceOverview from "../../components/admin/AttendanceOverview";
+import AnnouncementPanel from "../../components/admin/AnnouncementPanel";
+import AuditLogViewer from "../../components/admin/AuditLogViewer";
 import { useAuth } from "../../context/AuthContext";
 import { Users, BarChart2, Megaphone, ScrollText } from "lucide-react";
 
@@ -59,10 +59,10 @@ export default function AdminDashboard() {
         ))}
       </div>
 
-      {tab === "employees"  && <EmployeeManagementPage />}
-      {tab === "attendance" && <AdminAttendance />}
-      {tab === "announce"   && <AdminAnnouncements />}
-      {tab === "audit"      && <AuditLogPage />}
+      {tab === "employees"  && <EmployeeManagement />}
+      {tab === "attendance" && <AttendanceOverview />}
+      {tab === "announce"   && <AnnouncementPanel />}
+      {tab === "audit"      && <AuditLogViewer />}
     </PageWrapper>
   );
 }
