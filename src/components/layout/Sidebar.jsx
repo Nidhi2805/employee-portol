@@ -9,7 +9,7 @@ import {
   LayoutDashboard, ClipboardList, CalendarDays,
   CheckSquare, Bell, Users, FileText,
   LogOut, Briefcase, ShieldCheck, BarChart2,
-  Megaphone, ScrollText, X, KeyRound,
+  Megaphone, ScrollText, X, KeyRound, Building2, Clock
 } from "lucide-react";
 
 const navByRole = {
@@ -27,13 +27,15 @@ const navByRole = {
     { to: "/manager/tasks",       icon: CheckSquare,     label: "Task Board"   },
   ],
   admin: [
-  { to: "/admin/dashboard",      icon: LayoutDashboard, label: "Dashboard"        },
-  { to: "/admin/employees",      icon: Users,           label: "Employees"        },
-  { to: "/admin/attendance",     icon: BarChart2,       label: "Attendance"       },
-  { to: "/admin/leave-balances", icon: CalendarDays,    label: "Leave Balances"   },
-  { to: "/admin/announcements",  icon: Megaphone,       label: "Announcements"    },
-  { to: "/admin/password-resets",icon: KeyRound,        label: "Password Resets"  },
-  { to: "/admin/audit",          icon: ScrollText,      label: "Audit Log"        },
+  { to: "/admin/dashboard",      icon: LayoutDashboard, label: "Dashboard"       },
+  { to: "/admin/employees",      icon: Users,           label: "Employees"       },
+  { to: "/admin/departments",    icon: Building2,       label: "Departments"     },
+  { to: "/admin/analytics",      icon: BarChart2,       label: "Analytics"       },
+  { to: "/admin/attendance",     icon: Clock,           label: "Attendance"      },
+  { to: "/admin/leave-balances", icon: CalendarDays,    label: "Leave Balances"  },
+  { to: "/admin/announcements",  icon: Megaphone,       label: "Announcements"   },
+  { to: "/admin/password-resets",icon: KeyRound,        label: "Password Resets" },
+  { to: "/admin/audit",          icon: ScrollText,      label: "Audit Log"       },
 ],
 };
 

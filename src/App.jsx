@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Toaster } from "react-hot-toast";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { RequireAuth, RequireRole } from "./components/layout/ProtectedRoute";
+import Analytics         from "./pages/admin/Analytics";
+import DepartmentsPage   from "./pages/admin/DepartmentsPage";
 
 // Auth
 import Login from "./pages/Login";
@@ -94,6 +96,8 @@ function AdminRoutes() {
         <Route path="password-resets" element={<PasswordResetRequests />} />
         <Route path="audit"       element={<AuditLogPage />} />
         <Route path="*"           element={<Navigate to="/admin/dashboard" replace />} />
+        <Route path="analytics"   element={<Analytics />} />
+        <Route path="departments" element={<DepartmentsPage />} />
       </Routes>
     </RequireRole></RequireAuth>
   );
